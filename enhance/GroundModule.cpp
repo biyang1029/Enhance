@@ -281,7 +281,7 @@ void GroundModule::sweep_r_(double dt_s) {
         thomas_solve_(a, b, c, d, x);
         for (int ir = 0; ir < Nr_; ++ir) Tsoil_[ir][iz] = x[ir];
     }
-}}}
+}
 
 // ---- z-sweep：固定 r，沿 z 解 ----
 void GroundModule::sweep_z_(double dt_s) {
@@ -315,7 +315,7 @@ void GroundModule::sweep_z_(double dt_s) {
         thomas_solve_(a, b, c, d, x);
         for (int iz = 0; iz < Nz_; ++iz) Tsoil_[ir][iz] = x[iz];
     }
-}}}
+}
 
 // ---- Thomas 三对角求解 ----
 void GroundModule::thomas_solve_(const std::vector<double>& a,

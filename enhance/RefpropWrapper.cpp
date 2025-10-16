@@ -35,7 +35,7 @@ bool RefpropWrapper::load(const std::string& dll_dir){
 
 void RefpropWrapper::setFluid(const std::string& fluid){ fluid_ = fluid; }
 
-bool RefpropWrapper::psat_T(double T_K, double& P_kPa, int Qflag){
+bool RefpropWrapper::psat_T(double T_K, double& P_kPa, int Qflag) const{
     if (!REFPROPdll_) return false;
     // REFPROPdll(hFld,hIn,hOut,iUnits,iMass,iFlag,a,b,iErr,x,y,hErr,l1,l2,l3,lErr)
     char hFld[10000]={0}; strpad(hFld,sizeof(hFld),fluid_);
@@ -52,7 +52,7 @@ bool RefpropWrapper::psat_T(double T_K, double& P_kPa, int Qflag){
     return true;
 }
 
-bool RefpropWrapper::hs_from_TP(double T_K, double P_kPa, double& h_Jpkg, double& s_JpkgK){
+bool RefpropWrapper::hs_from_TP(double T_K, double P_kPa, double& h_Jpkg, double& s_JpkgK) const{
     if (!REFPROPdll_) return false;
     char hFld[10000]={0}; strpad(hFld,sizeof(hFld),fluid_);
     char hIn[4]={0};  strpad(hIn,sizeof(hIn),"TP");
@@ -69,7 +69,7 @@ bool RefpropWrapper::hs_from_TP(double T_K, double P_kPa, double& h_Jpkg, double
     return true;
 }
 
-bool RefpropWrapper::hT_from_PS(double P_kPa, double s_JpkgK, double& h_Jpkg, double& T_K){
+bool RefpropWrapper::hT_from_PS(double P_kPa, double s_JpkgK, double& h_Jpkg, double& T_K) const{
     if (!REFPROPdll_) return false;
     char hFld[10000]={0}; strpad(hFld,sizeof(hFld),fluid_);
     char hIn[4]={0};  strpad(hIn,sizeof(hIn),"PS");
