@@ -21,6 +21,7 @@ public:
         double h1 = 0.0, h2s = 0.0, h2 = 0.0, h3 = 0.0;
     };
     void setDemand(double q_kW) { cfg_.hp.Q_demand_kW = q_kW; }
+    void setMassFlow(double kgps) { cfg_.fluid.massFlow_kgps = kgps; }
     const HPDebug& lastDebug() const { return last_debug_; }
 
 private:

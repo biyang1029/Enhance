@@ -312,6 +312,18 @@ void GroundModule::sweep_z_(double dt_s) {
             d[iz] = cap * Tsoil_[ir][iz];
         }
 
+        // Dirichlet boundary at top/bottom using geothermal gradient profile
+        // T(z) = T_surface + geograd * z
+        if (Nz_ >= 1) {
+            double T_top = cfg_.T_surface_C + cfg_.geograd_C_per_m * z_[0];
+            a[0] = 0.0; c[0] = 0.0; b[0] = 1.0; d[0] = T_top;
+        }
+        if (Nz_ >= 2) {
+            int izb = Nz_ - 1;
+            double T_bot = cfg_.T_surface_C + cfg_.geograd_C_per_m * z_[izb];
+            a[izb] = 0.0; c[izb] = 0.0; b[izb] = 1.0; d[izb] = T_bot;
+        }
+
         thomas_solve_(a, b, c, d, x);
         for (int iz = 0; iz < Nz_; ++iz) Tsoil_[ir][iz] = x[iz];
     }

@@ -12,13 +12,20 @@ public:
     bool open(const std::string& path);
     bool openDebug(const std::string& path);
     void writeHour(int hour,
-		double T_source_out_C,
-		double T_return_C,
-		double COP,
-		double Q_out_kW,
-		double P_el_kW,
-		double Q_geo_kW,
-		const std::string& model);
+        double T_source_out_C,
+        double T_return_C,
+        double COP,
+        double Q_out_kW,
+        double P_el_kW,
+        double Q_geo_kW,
+        const std::string& model,
+        double T_tank_C,
+        int    HP_on,
+        double Q_space_req_kW,
+        double Q_dhw_req_kW,
+        double Q_space_served_kW,
+        double Q_dhw_served_kW,
+        double Q_unmet_kW);
     void writeDebugHour(int hour,
         const std::string& fluid,
         bool used_coolprop,

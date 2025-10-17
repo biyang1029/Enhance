@@ -1,7 +1,10 @@
 ﻿// ========================= SimulationController.cpp =========================
+#define _CRT_SECURE_NO_WARNINGS 1
 #include "SimulationController.h"
 #include <iostream>
 #include <string>
+#include <cstdlib>
+#include <algorithm>
 
 // 进度条打印
 static void printProgress(int done, int total, int barWidth = 40) {
@@ -19,6 +22,7 @@ bool SimulationController::run(const std::string& csv_path) {
     // 初始化模块
     ground_.initialize(cfg_);
     hp_.initialize(cfg_);
+    tank_.initialize(cfg_);
 
     if (!logger_.open(csv_path)) {
         std::cerr << "[Error] Failed to open log file: " << csv_path << "\n";
@@ -29,17 +33,53 @@ bool SimulationController::run(const std::string& csv_path) {
 
     // 回水初值
     double T_return = cfg_.fluid.inlet_T_C;
+    tank_.reset(cfg_.tank.setpoint_C);
     const int    maxIter = 300;
     const double tolT    = 0.005;
     const double relax   = 0.5;
 
+    // Variable flow configuration (min/max kg/s), default around base mass flow
+    static bool flow_cfg_inited = false;
+    static double flow_min_kgps = 0.0, flow_max_kgps = 0.0;
+    if (!flow_cfg_inited) {
+        double base = cfg_.fluid.massFlow_kgps;
+        flow_min_kgps = std::max(0.1, 0.4 * base);
+        flow_max_kgps = std::max(flow_min_kgps, 1.2 * base);
+        if (const char* v = std::getenv("FLOW_MIN_KGPS")) { try { flow_min_kgps = std::stod(v); } catch(...) {} }
+        if (const char* v = std::getenv("FLOW_MAX_KGPS")) { try { flow_max_kgps = std::stod(v); } catch(...) {} }
+        flow_cfg_inited = true;
+    }
+
     for (int h = 0; h < cfg_.time.totalSteps; ++h) {
+        double Q_space_req_kW = 0.0;
         // 每小时（如启用）计算天气负荷并注入
         if (cfg_.load.enable_weather) {
             static bool loaded = false;
             if (!loaded) { load_.loadCSV(cfg_.load.weather_csv, cfg_.load.column_name); loaded = true; }
-            hp_.setDemand(load_.demandAt(h, cfg_.load));
+            Q_space_req_kW = load_.demandAt(h, cfg_.load);
         }
+        double Q_dhw_req_kW = cfg_.dhw.enable ? load_.dhwAt(h, cfg_.dhw) : 0.0;
+
+        // Tank thermostat on/off with deadband
+        const double Ttank = tank_.temperature_C();
+        const double on_th  = cfg_.tank.setpoint_C - cfg_.tank.deadband_K;
+        const double off_th = cfg_.tank.setpoint_C + cfg_.tank.deadband_K;
+        if (!hp_on_ && Ttank <= on_th) hp_on_ = true;
+        if (hp_on_  && Ttank >= off_th) hp_on_ = false;
+
+        // Compressor demand based on thermostat
+        if (hp_on_) hp_.setDemand(cfg_.hp.max_Q_out_kW); else hp_.setDemand(0.0);
+
+        // Variable flow control: scale between min/max by (space+dhw)/Qmax when ON
+        double frac = 0.0;
+        if (hp_on_) {
+            double qreq = std::max(0.0, Q_space_req_kW + Q_dhw_req_kW);
+            double qmax = std::max(1e-6, cfg_.hp.max_Q_out_kW);
+            frac = std::clamp(qreq / qmax, 0.0, 1.0);
+        }
+        double flow_now = flow_min_kgps + (flow_max_kgps - flow_min_kgps) * frac;
+        ground_.setMassFlow(flow_now);
+        hp_.setMassFlow(flow_now);
 
         double COP = 0, Q_out_kW = 0, P_el_kW = 0, Q_geo_kW = 0;
         double T_iter = T_return;
@@ -57,6 +97,11 @@ bool SimulationController::run(const std::string& csv_path) {
         T_source_out = ground_.step(T_iter, Q_geo_kW, /*advanceSoil=*/true);
         double T_return_next = hp_.step(T_source_out, COP, Q_out_kW, P_el_kW);
 
+        // Apply tank energy balance for this step
+        double Q_space_served_kW = 0.0, Q_dhw_served_kW = 0.0, Q_unmet_kW = 0.0;
+        tank_.applyHour(cfg_.time.timeStep_s, Q_out_kW, Q_space_req_kW, Q_dhw_req_kW,
+                        Q_space_served_kW, Q_dhw_served_kW, Q_unmet_kW);
+
         // 一次性在控制台打印后端信息
         {
             static bool printed_backend = false;
@@ -73,7 +118,10 @@ bool SimulationController::run(const std::string& csv_path) {
         {
             auto dbg = hp_.lastDebug();
             std::string model = dbg.used_coolprop ? "CP" : "FB";
-            logger_.writeHour(h, T_source_out, T_return_next, COP, Q_out_kW, P_el_kW, Q_geo_kW, model);
+            logger_.writeHour(h, T_source_out, T_return_next, COP, Q_out_kW, P_el_kW, Q_geo_kW, model,
+                              tank_.temperature_C(), hp_on_?1:0,
+                              Q_space_req_kW, Q_dhw_req_kW,
+                              Q_space_served_kW, Q_dhw_served_kW, Q_unmet_kW);
             logger_.writeDebugHour(h, dbg.fluid, dbg.used_coolprop,
                                    dbg.T_evap_sat_K, dbg.T_cond_sat_K,
                                    dbg.P_evap_kPa, dbg.P_cond_kPa,

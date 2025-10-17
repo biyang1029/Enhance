@@ -103,7 +103,15 @@ double HeatPumpModule::step(double T_source_out_C,
             last_debug_.h3 = h3;
             double num = (h2 - h3);
             double den = (std::max)(1e-6, h2 - h1);
-            COP = clampd(num/den, 1.0, 10.0);
+            COP = num/den;
+            // Sanity bound COP with Carnot-based efficiency ceiling and a hard cap
+            double T_evap_K = Tevap_sat_guard_K + cfg_.hp.superheat_K;
+            double T_cond_K = (std::max)(1.0, Tcond_sat_K - cfg_.hp.subcool_K);
+            if (T_cond_K - T_evap_K < 1.0) T_evap_K = T_cond_K - 1.0;
+            double COP_carnot = (T_cond_K > T_evap_K + 1e-6) ? (T_cond_K / (T_cond_K - T_evap_K)) : 1.0;
+            double eff = cfg_.hp.eff_carnot * (0.9 * cfg_.hp.eta_isentropic + 0.1);
+            double COP_cap = (std::max)(1.0, eff * COP_carnot);
+            COP = clampd(COP, 1.0, (std::min)(8.0, COP_cap));
             used_cp = std::isfinite(COP);
             last_debug_.used_coolprop = used_cp;
             if (!used_cp && !warned_failure){
@@ -132,25 +140,44 @@ double HeatPumpModule::step(double T_source_out_C,
     scale = clampd(scale, 0.0, 1.0);
     Q_target *= scale;
 
+    // If no demand requested (e.g., compressor off), return no output and zero power
+    if (Q_target <= 1e-9) {
+        Q_out_kW = 0.0;
+        P_el_kW  = 0.0;
+        COP      = 0.0;
+        return T_source_out_C;
+    }
+
     const double m_dot = (std::max)(1e-9, cfg_.fluid.massFlow_kgps);
     const double cp    = cfg_.fluid.cp;
 
-    const double Q_geo_need_kW = (COP > 1.0) ? Q_target * (1.0 - 1.0 / COP) : 0.0;
-    double dT_need = (Q_geo_need_kW * 1000.0) / (m_dot * cp);
+    // Compute capacity limit from source dT cap and nameplate
+    double dT_cap = cfg_.hp.max_source_dT_per_hour; // K per hour on source
+    // also enforce freeze guard safety on this step
+    double max_drop_to_guard = std::max(0.0, T_source_out_C - cfg_.hp.min_source_return_C);
+    dT_cap = std::min(dT_cap, max_drop_to_guard);
+    if (COP <= 1.0 || dT_cap <= 0.0) {
+        Q_out_kW = 0.0; P_el_kW = 0.0; return T_source_out_C; // no capacity
+    }
+    const double Q_out_cap_src_kW = (COP / (COP - 1.0)) * (m_dot * cp * dT_cap) / 1000.0;
 
-    const double dT_max = (std::max)(0.5, cfg_.hp.max_source_dT_per_hour);
-    dT_need = clampd(dT_need, 0.0, dT_max);
+    // Demand after modulation (freeze-guard scale already applied in Q_target)
+    double Q_out_demand_kW = Q_target;
+    // Final served output limited by source capacity + nameplate
+    Q_out_kW = std::max(0.0, std::min({ Q_out_demand_kW, Q_out_cap_src_kW, cfg_.hp.max_Q_out_kW }));
+    P_el_kW  = Q_out_kW / COP;
+
+    // Back-compute source dT actually used
+    double Q_geo_served_kW = Q_out_kW * (1.0 - 1.0 / COP);
+    double dT_need = (Q_geo_served_kW * 1000.0) / (m_dot * cp);
+    dT_need = std::clamp(dT_need, 0.0, dT_cap);
 
     double T_return_C = T_source_out_C - dT_need;
-    if (T_return_C < T_freeze_C) {
-        T_return_C = T_freeze_C;
-        dT_need = T_source_out_C - T_return_C;
-    }
-
-    const double Q_geo_act_kW = (m_dot * cp * dT_need) / 1000.0;
-    Q_out_kW = (COP > 1.0) ? (COP / (COP - 1.0)) * Q_geo_act_kW : 0.0;
-    P_el_kW  = (COP > 0.0) ? Q_out_kW / COP : 0.0;
+    if (T_return_C < cfg_.hp.min_source_return_C) T_return_C = cfg_.hp.min_source_return_C;
 
     return T_return_C;
 }
+
+
+
 

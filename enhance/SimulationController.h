@@ -4,6 +4,7 @@
 #include "DataConfig.h"
 #include "GroundModule.h"
 #include "HeatPumpModule.h"
+#include "TankModule.h"
 #include "Logger.h"
 #include "LoadModel.h"
 
@@ -18,6 +19,8 @@ private:
     DataConfig cfg_;
     GroundModule ground_;
     HeatPumpModule hp_;
+    TankModule    tank_;
     Logger logger_;
     LoadModel load_;
+    bool hp_on_ = false;
 };

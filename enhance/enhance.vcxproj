@@ -155,6 +155,7 @@
     <ClInclude Include="GroundModule.h" />
     <ClInclude Include="Utils.h" />
     <ClInclude Include="LoadModel.h" />
+    <ClInclude Include="TankModule.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Dataconfig.cpp" />

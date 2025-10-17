@@ -53,9 +53,31 @@ struct LoadConfig {
     bool        enable_weather = false;        // enable weather-based load model
     std::string weather_csv    = "weather.csv"; // CSV path relative to working dir
     std::string column_name    = "T_out_C";    // column name for outdoor temperature (C)
-    double      indoor_T_C     = 20.0;         // indoor setpoint temperature (C)
-    double      UA_kW_per_K    = 0.0;          // load slope (kW per K)
-    double      base_kW        = 0.0;          // base load offset (kW)
+    double      indoor_T_C     = 22.0;         // indoor setpoint temperature (C)
+    double      UA_kW_per_K    = 4.0;          // load slope (kW per K)
+    double      base_kW        = 5.0;          // base load offset (kW)
+};
+
+// Domestic Hot Water (DHW) load configuration (simple schedule-based)
+struct DHWConfig {
+    bool   enable = true;           // enable DHW load model
+    double base_kW = 0.3;           // continuous circulation/standby draw
+    int    morning_start_h = 6;     // morning peak start (hour in 0..23)
+    int    morning_hours   = 2;     // morning peak duration (hours)
+    double morning_kW      = 3.0;   // morning peak draw (kW)
+    int    evening_start_h = 19;    // evening peak start
+    int    evening_hours   = 2;     // evening peak duration
+    double evening_kW      = 3.0;   // evening peak draw (kW)
+};
+
+// Simple single-node buffer tank
+struct TankConfig {
+    double volume_m3     = 1.0;   // tank volume (m3)
+    double setpoint_C    = 45.0;  // target tank temperature (C)
+    double deadband_K    = 2.0;   // on/off deadband (+/- K around setpoint)
+    double min_T_C       = 30.0;  // minimum allowed tank temperature supplying loads (C)
+    double ambient_T_C   = 20.0;  // ambient around tank for losses (C)
+    double UA_kW_per_K   = 0.02;  // tank heat loss to ambient (kW/K)
 };
 
 struct HeatPumpConfig {
@@ -77,6 +99,8 @@ struct HeatPumpConfig {
     double subcool_K   = 5.0;       // condenser outlet subcooling
     double eta_isentropic = 0.70;   // compressor isentropic efficiency
     bool   use_coolprop = true;     // allow disabling CoolProp runtime model
+    double max_Q_out_kW = 150.0;   // nameplate max heating output (kW)
+    double min_source_return_C = 1.0; // minimum allowed source return temp (C)
 };
 
 // —— 总配置 —— //
@@ -102,6 +126,9 @@ struct DataConfig {
 
     // 热泵/负荷
     HeatPumpConfig   hp;
+    // Buffer tank and DHW
+    TankConfig       tank;
+    DHWConfig        dhw;
 
     // Nu 计算策略：Nu = f(Re, Pr, z)
     // 你可以在 cpp 里设置默认策略：z >= 1500m 使用增强段

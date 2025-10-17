@@ -50,3 +50,20 @@ double LoadModel::demandAt(int hourIndex, const LoadConfig& cfg) const{
     return std::max(0.0, q);
 }
 
+double LoadModel::dhwAt(int hourIndex, const DHWConfig& cfg) const{
+    if (!cfg.enable) return 0.0;
+    int h = 0;
+    if (hourIndex >= 0) h = hourIndex % 24;
+    double q = cfg.base_kW;
+    auto in_window = [&](int start_h, int hours){
+        if (hours <= 0) return false;
+        int end = (start_h + hours - 1) % 24;
+        if (hours >= 24) return true;
+        if (start_h + hours <= 24) return (h >= start_h && h < start_h + hours);
+        // wrap across midnight
+        return (h >= start_h || h < end + 1);
+    };
+    if (in_window(cfg.morning_start_h, cfg.morning_hours)) q += std::max(0.0, cfg.morning_kW);
+    if (in_window(cfg.evening_start_h, cfg.evening_hours)) q += std::max(0.0, cfg.evening_kW);
+    return std::max(0.0, q);
+}
