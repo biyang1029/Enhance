@@ -5,6 +5,7 @@
 #include "GroundModule.h"
 #include "HeatPumpModule.h"
 #include "Logger.h"
+#include "LoadModel.h"
 
 
 class SimulationController {
@@ -14,8 +15,9 @@ public:
 
 
 private:
-	DataConfig cfg_;
-	GroundModule ground_;
-	HeatPumpModule hp_;
-	Logger logger_;
+    DataConfig cfg_;
+    GroundModule ground_;
+    HeatPumpModule hp_;
+    Logger logger_;
+    LoadModel load_;
 };

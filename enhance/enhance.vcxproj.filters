@@ -55,6 +55,4 @@
     </ClCompile>
     <ClCompile Include="Logger.cpp">
       <Filter>源文件</Filter>
-    </ClCompile>
-  </ItemGroup>
-</Project>
+    </ClCompile>`n    <ClCompile Include="LoadModel.cpp">`n      <Filter>Դ�ļ�</Filter>`n    </ClCompile>`n  </ItemGroup>`n</Project>

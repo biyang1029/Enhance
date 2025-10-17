@@ -48,6 +48,16 @@ struct TimeControl {
 
 
 // —— 热泵/负荷的最小占位（后续细化） —— //
+// Weather-driven load configuration
+struct LoadConfig {
+    bool        enable_weather = false;        // enable weather-based load model
+    std::string weather_csv    = "weather.csv"; // CSV path relative to working dir
+    std::string column_name    = "T_out_C";    // column name for outdoor temperature (C)
+    double      indoor_T_C     = 20.0;         // indoor setpoint temperature (C)
+    double      UA_kW_per_K    = 0.0;          // load slope (kW per K)
+    double      base_kW        = 0.0;          // base load offset (kW)
+};
+
 struct HeatPumpConfig {
 
     double defaultCOP = 3.0;          // 可保留备用
@@ -66,8 +76,7 @@ struct HeatPumpConfig {
     double superheat_K = 3.0;       // evaporator outlet superheat
     double subcool_K   = 5.0;       // condenser outlet subcooling
     double eta_isentropic = 0.70;   // compressor isentropic efficiency
-    bool   use_refprop = true;      // allow disabling REFPROP at runtime
-    std::string refprop_dll_dir = "D:/yangb/soft/refpro"; // REFPROP DLL directory (empty for fallback)
+    bool   use_coolprop = true;     // allow disabling CoolProp runtime model
 };
 
 // —— 总配置 —— //
@@ -107,6 +116,8 @@ struct DataConfig {
         // Pr = cp * mu / k
         return (fluid.cp * fluid.mu) / fluid.k;
     }
+    // Weather/load configuration
+    LoadConfig load;
 };
 
 // 全局配置（方便各模块直接 include 使用）
