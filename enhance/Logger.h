@@ -25,7 +25,10 @@ public:
         double Q_dhw_req_kW,
         double Q_space_served_kW,
         double Q_dhw_served_kW,
-        double Q_unmet_kW);
+        double Q_unmet_kW,
+        double flow_kgps,
+        double dP_kPa,
+        double P_pump_kW);
     void writeDebugHour(int hour,
         const std::string& fluid,
         bool used_coolprop,

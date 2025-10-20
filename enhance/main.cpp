@@ -41,6 +41,62 @@ int main() {
     if (const char* v = std::getenv("DHW_EVE_HOURS"))   try { CFG.dhw.evening_hours   = std::stoi(v);} catch(...) {}
     if (const char* v = std::getenv("DHW_EVE_KW"))      try { CFG.dhw.evening_kW      = std::stod(v);} catch(...) {}
 
+    // Pump hydraulics overrides
+    if (const char* v = std::getenv("PUMP_EFF"))           try { CFG.pump.eff = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("PUMP_REL_ROUGH"))     try { CFG.pump.rel_roughness = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("PUMP_K_MINOR_ANN"))   try { CFG.pump.K_minor_annulus = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("PUMP_K_MINOR_INNER")) try { CFG.pump.K_minor_inner   = std::stod(v);} catch(...) {}
+
+    // Enhanced pipe overrides
+    if (const char* v = std::getenv("EHEP_ENABLE"))     { CFG.enh.enable = (*v!='0' && *v!='n' && *v!='N'); }
+    if (const char* v = std::getenv("EHEP_NU_MULT"))    try { CFG.enh.nu_mult = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("EHEP_F_MULT"))     try { CFG.enh.f_mult  = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("EHEP_Z_START_M")) try { CFG.enh.z_start_m = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("EHEP_Z_END_M"))   try { CFG.enh.z_end_m   = std::stod(v);} catch(...) {}
+
+    // Economics overrides
+    if (const char* v = std::getenv("ECON_ELEC_PRICE"))   try { CFG.econ.elec_price_per_kWh = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("ECON_CAPEX"))        try { CFG.econ.capex = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("ECON_LIFETIME_Y"))   try { CFG.econ.lifetime_years = std::stod(v);} catch(...) {}
+    if (const char* v = std::getenv("ECON_DR"))           try { CFG.econ.discount_rate = std::stod(v);} catch(...) {}
+
+    // Simulation horizon: default to 1 year at 1-hour timestep unless overridden
+    {
+        int years = 1;
+        if (const char* v = std::getenv("SIM_YEARS")) { try { years = std::max(1, std::stoi(v)); } catch(...) {} }
+        int dt_s = 3600;
+        if (const char* v = std::getenv("TIME_STEP_S")) { try { dt_s = std::max(60, std::stoi(v)); } catch(...) {} }
+        CFG.time.timeStep_s = static_cast<double>(dt_s);
+        // steps per hour = 3600/dt_s
+        int steps_per_year = static_cast<int>( (3600.0 / CFG.time.timeStep_s) * 8760.0 + 0.5 );
+        CFG.time.totalSteps = years * steps_per_year;
+    }
+
+    // Default bottom-only enhancement zone if enabled but no interval provided
+    if (CFG.enh.enable) {
+        if (!(CFG.enh.z_end_m > CFG.enh.z_start_m)) {
+            double L = CFG.well.depth_m;
+            CFG.enh.z_start_m = 0.7 * L; // bottom 30% by default
+            CFG.enh.z_end_m   = L;
+        }
+    }
+
+    // Wrap Nu with enhancement multiplier if enabled
+    if (CFG.enh.enable) {
+        auto baseNu = CFG.NuFunc;
+        CFG.NuFunc = [baseNu](double Re, double Pr, double z)->double{
+            double nu = 50.0;
+            try {
+                if (baseNu) nu = baseNu(Re, Pr, z);
+            } catch(...) {}
+            bool enhAll = (CFG.enh.z_end_m <= CFG.enh.z_start_m) || (CFG.enh.z_end_m <= 0.0);
+            if (CFG.enh.enable && (enhAll || (z >= CFG.enh.z_start_m && z <= CFG.enh.z_end_m))) {
+                nu *= std::max(1.0, CFG.enh.nu_mult);
+            }
+            return nu;
+        };
+    }
+
     SimulationController sim(CFG);
     sim.run("results.csv");
     return 0;

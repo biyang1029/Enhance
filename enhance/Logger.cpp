@@ -9,7 +9,7 @@ bool Logger::open(const std::string& path) {
     if (this->ofs_dbg_.is_open()) this->ofs_dbg_.close();
     this->ofs_.open(path, std::ios::out | std::ios::trunc);
     if (!this->ofs_) return false;
-    this->ofs_ << "step,T_source_out_C,T_return_C,COP,Q_out_kW,P_el_kW,Q_geo_kW,model,T_tank_C,HP_on,Q_space_req_kW,Q_dhw_req_kW,Q_space_served_kW,Q_dhw_served_kW,Q_unmet_kW\n";
+    this->ofs_ << "step,T_source_out_C,T_return_C,COP,Q_out_kW,P_el_kW,Q_geo_kW,model,T_tank_C,HP_on,Q_space_req_kW,Q_dhw_req_kW,Q_space_served_kW,Q_dhw_served_kW,Q_unmet_kW,flow_kgps,dP_kPa,P_pump_kW\n";
     return true;
 }
 
@@ -36,9 +36,12 @@ void Logger::writeHour(int hour,
 	double Q_dhw_req_kW,
 	double Q_space_served_kW,
 	double Q_dhw_served_kW,
-	double Q_unmet_kW) {
-    if (!this->ofs_) return;
-    this->ofs_ << hour << ','
+	double Q_unmet_kW,
+	double flow_kgps,
+	double dP_kPa,
+	double P_pump_kW) {
+	if (!this->ofs_) return;
+	this->ofs_ << hour << ','
 		<< std::fixed << std::setprecision(4)
 		<< T_source_out_C << ','
 		<< T_return_C << ','
@@ -52,7 +55,10 @@ void Logger::writeHour(int hour,
 		<< Q_dhw_req_kW << ','
 		<< Q_space_served_kW << ','
 		<< Q_dhw_served_kW << ','
-		<< Q_unmet_kW << "\n";
+		<< Q_unmet_kW << ','
+		<< flow_kgps << ','
+		<< dP_kPa << ','
+		<< P_pump_kW << "\n";
 }
 
 void Logger::writeDebugHour(int hour,

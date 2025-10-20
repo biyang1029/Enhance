@@ -80,6 +80,22 @@ struct TankConfig {
     double UA_kW_per_K   = 0.02;  // tank heat loss to ambient (kW/K)
 };
 
+// Pump hydraulics configuration
+struct PumpConfig {
+    double eff = 0.70;            // pump-wire efficiency
+    double rel_roughness = 1e-5;  // relative roughness epsilon/D (dimensionless)
+    double K_minor_annulus = 5.0; // sum of minor-loss K on annulus (elbows, entrance, etc.)
+    double K_minor_inner   = 5.0; // sum of minor-loss K on inner pipe
+};
+
+// Enhanced Heat Exchange Pipe (EHEP) configuration
+struct EnhanceConfig {
+    bool   enable    = true;   // enable enhancement multipliers
+    double nu_mult   = 1.25;   // multiplier on convective Nu (thus on h)
+    double f_mult    = 1.41;   // multiplier on Darcy friction factor (annulus)
+    double z_start_m = 0.0;    // start depth (m); if z_end_m<=z_start_m, apply to whole length
+    double z_end_m   = 0.0;    // end depth (m)
+};
 struct HeatPumpConfig {
 
     double defaultCOP = 3.0;          // 可保留备用
@@ -129,6 +145,14 @@ struct DataConfig {
     // Buffer tank and DHW
     TankConfig       tank;
     DHWConfig        dhw;
+    PumpConfig       pump;
+    EnhanceConfig    enh;
+    struct EconConfig {
+        double elec_price_per_kWh = 0.0; // currency/kWh
+        double capex = 0.0;              // currency
+        double lifetime_years = 20.0;
+        double discount_rate  = 0.08;
+    } econ;
 
     // Nu 计算策略：Nu = f(Re, Pr, z)
     // 你可以在 cpp 里设置默认策略：z >= 1500m 使用增强段

@@ -86,11 +86,29 @@ double HeatPumpModule::step(double T_source_out_C,
     if (cfg_.hp.use_coolprop && g_coolprop.try_load()){
         try {
             const std::string& fluid = cfg_.hp.fluid;
-            auto P_evap_Pa = g_coolprop.PropsSI("P","T",Tevap_sat_guard_K,"Q",1.0,fluid.c_str());
-            auto P_cond_Pa = g_coolprop.PropsSI("P","T",Tcond_sat_K,         "Q",0.0,fluid.c_str());
+            // Clamp cycle temperatures to CoolProp-safe domain
+            // Query fluid critical and triple temperatures to avoid out-of-range calls
+            double Tcrit = 0.0, Ttrip = 0.0;
+            try {
+                Tcrit = g_coolprop.PropsSI("Tcrit", "", 0.0, "", 0.0, fluid.c_str());
+                Ttrip = g_coolprop.PropsSI("T_triple", "", 0.0, "", 0.0, fluid.c_str());
+            } catch(...) { /* leave zeros, guard below */ }
+            if (!(Tcrit > 0.0)) Tcrit = 1e9; // very high sentinel
+            if (!(Ttrip > 0.0)) Ttrip = 50.0; // ~50 K sentinel
+
+            // Enforce ordering and margins between evap/cond temperatures
+            constexpr double Kmin = 0.5; // minimal approach margin in K
+            double Tevap_sat = Tevap_sat_guard_K;
+            double Tcond_sat = Tcond_sat_K;
+            // Boundaries
+            Tevap_sat = std::max(Ttrip + Kmin, std::min(Tevap_sat, Tcrit - 5.0));
+            Tcond_sat = std::max(Tevap_sat + 2.0*Kmin, std::min(Tcond_sat, Tcrit - Kmin));
+
+            auto P_evap_Pa = g_coolprop.PropsSI("P","T",Tevap_sat,"Q",1.0,fluid.c_str());
+            auto P_cond_Pa = g_coolprop.PropsSI("P","T",Tcond_sat,         "Q",0.0,fluid.c_str());
             last_debug_.P_evap_kPa = P_evap_Pa/1000.0;
             last_debug_.P_cond_kPa = P_cond_Pa/1000.0;
-            auto T_superheat_K = Tevap_sat_guard_K + cfg_.hp.superheat_K;
+            auto T_superheat_K = std::max(Tevap_sat + Kmin, Tevap_sat + cfg_.hp.superheat_K);
             auto h1 = g_coolprop.PropsSI("H","T",T_superheat_K,"P",P_evap_Pa,fluid.c_str());
             last_debug_.h1 = h1;
             auto s1 = g_coolprop.PropsSI("S","T",T_superheat_K,"P",P_evap_Pa,fluid.c_str());
@@ -98,15 +116,16 @@ double HeatPumpModule::step(double T_source_out_C,
             auto h2  = h1 + (h2s - h1) / (std::max)(0.1, cfg_.hp.eta_isentropic);
             last_debug_.h2s = h2s;
             last_debug_.h2  = h2;
-            auto T_subcool_K = (std::max)(1.0, Tcond_sat_K - cfg_.hp.subcool_K);
+            auto T_subcool_K = (std::max)(Ttrip + Kmin, Tcond_sat - std::max(1.0, cfg_.hp.subcool_K));
+            if (T_subcool_K > Tcond_sat - Kmin) T_subcool_K = Tcond_sat - Kmin;
             auto h3 = g_coolprop.PropsSI("H","T",T_subcool_K,"P",P_cond_Pa,fluid.c_str());
             last_debug_.h3 = h3;
             double num = (h2 - h3);
             double den = (std::max)(1e-6, h2 - h1);
             COP = num/den;
             // Sanity bound COP with Carnot-based efficiency ceiling and a hard cap
-            double T_evap_K = Tevap_sat_guard_K + cfg_.hp.superheat_K;
-            double T_cond_K = (std::max)(1.0, Tcond_sat_K - cfg_.hp.subcool_K);
+            double T_evap_K = T_superheat_K;
+            double T_cond_K = T_subcool_K + std::max(1.0, cfg_.hp.subcool_K);
             if (T_cond_K - T_evap_K < 1.0) T_evap_K = T_cond_K - 1.0;
             double COP_carnot = (T_cond_K > T_evap_K + 1e-6) ? (T_cond_K / (T_cond_K - T_evap_K)) : 1.0;
             double eff = cfg_.hp.eff_carnot * (0.9 * cfg_.hp.eta_isentropic + 0.1);
