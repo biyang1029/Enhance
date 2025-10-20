@@ -1,11 +1,11 @@
-﻿// GroundModule.cpp
+// GroundModule.cpp
 #include "GroundModule.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 
 
-// ---- 初始化 ----
+// ---- ????? ----
 void GroundModule::initialize(const DataConfig& cfg) {
     cfg_ = cfg;
     N_ = cfg_.well.segments;
@@ -15,52 +15,52 @@ void GroundModule::initialize(const DataConfig& cfg) {
     T_outer_.assign(N_, cfg_.fluid.inlet_T_C);
     T_inner_.assign(N_, cfg_.fluid.inlet_T_C);
 
-    // 段中心深度
+    // ?????????
     for (int i = 0; i < N_; ++i) {
         zc_[i] = (i + 0.5) * dz_;
     }
-    // 井壁半径（用外管外径的一半）
+    // ???????????????????
     double D_bore = (cfg_.well.borehole_D_m > 0.0 ? cfg_.well.borehole_D_m : cfg_.well.D_outer_m);
     r_bore_ = std::max(1e-6, 0.5 * D_bore);
 
-    // Nz_ 与 z_（纵向与管段一致）
+    // Nz_ ?? z_????????????��?
     Nz_ = N_;
     z_.resize(Nz_);
     for (int i = 0; i < Nz_; ++i) z_[i] = zc_[i];
 
-    // 构建径向稳健型网格并初始化土壤温度场
+    // ??????????????????????????????
     build_soil_grid_();
     init_soil_field_();
 
-    // 初始把管内水温设为贴近壁面土壤温，减少第0小时尖峰
+    // ???????????????????????????��??????0��????
     double Twall0 = Tsoil_.size() ? Tsoil_[0][0] : (cfg_.T_surface_C + cfg_.geograd_C_per_m * zc_[0]);
     std::fill(T_outer_.begin(), T_outer_.end(), Twall0);
     std::fill(T_inner_.begin(), T_inner_.end(), Twall0);
 
-    // 预分配井壁线热流
+    // ????��????????
     q_line_wall_.assign(Nz_, 0.0);
 
 }
 
-// ---- 每小时一步：输入回水温，返回出水温；同时返回该小时取热量（kW） ----
-double GroundModule::step(double T_return_C, double& Q_extracted_kW, bool advanceSoil) {
+// ---- ?��?????????????��????????��????????��????????kW?? ----
+double GroundModule::step(double T_return_C, double& Q_extracted_kW, double dt_s, bool advanceSoil) {
 
 
-    // 井壁处土壤温度作为本小时壁温（来自上一步更新的 Tsoil_）
+    // ?????????????????��????��?????????????��? Tsoil_??
     std::vector<double> T_soil_local(N_);
     for (int i = 0; i < N_; ++i) {
         T_soil_local[i] = (Nr_ > 0) ? Tsoil_[0][i]
             : (cfg_.T_surface_C + cfg_.geograd_C_per_m * zc_[i]);
     }
 
-    // 1) 外管：由井口向下（回水进入外管顶部）
+    // 1) ????????????��????????????????
     update_outer_downstream_(T_return_C, T_soil_local);
 
-    // 2) 内管：由井底向上（内外管之间换热，先不重复计土壤）
+    // 2) ?????????????????????��?????????????????
     update_inner_upstream_(T_outer_.back(), T_outer_);
 
-    // 3) 统一用 R′（单位长度总热阻）构造 q_line_wall_[i] (W/m)
-    //    —— 这些公共量只计算一次，后面复用 —— 
+    // 3) ???? R????��?????????�h???? q_line_wall_[i] (W/m)
+    //    ???? ??��?????????????��????��?? ???? 
     const double D_out = std::max(1e-6, cfg_.well.D_outer_m);
     const double r_po = 0.5 * D_out;
     const double t_p = std::max(1e-6, cfg_.well.pipe_wall_thickness_m);
@@ -75,35 +75,36 @@ double GroundModule::step(double T_return_C, double& Q_extracted_kW, bool advanc
     for (int i = 0; i < N_; ++i) {
         const double z = zc_[i];
         const double Nu = cfg_.NuFunc ? cfg_.NuFunc(Re_outer, Pr, z) : 50.0;
-        const double h = Nu * cfg_.fluid.k / D_out; // W/m^2-K（外环流体侧）
+        const double h = Nu * cfg_.fluid.k / D_out; // W/m^2-K?????????
 
-        // 单位长度总热阻 R′ (K/W per meter)
+        // ??��?????????? R?? (K/W per meter)
         const double Rf = 1.0 / std::max(1e-9, h * P_f);
-        const double Rp = std::log(r_po / r_pi) / (2.0 * PI * std::max(1e-9, cfg_.pipe.k));
+        const double k_outer = (cfg_.pipe_k_outer > 0.0 ? cfg_.pipe_k_outer : cfg_.pipe.k);
+        const double Rp = std::log(r_po / r_pi) / (2.0 * PI * std::max(1e-9, k_outer));
         const double Rg = std::log(r_bo / r_po) / (2.0 * PI * std::max(1e-9, cfg_.grout.k));
         const double Rtot = Rf + Rp + Rg;
 
-        const double T_wall = Tsoil_[0][i]; // 井壁处土温
+        const double T_wall = Tsoil_[0][i]; // ?????????
         q_line_wall_[i] = (T_outer_[i] - T_wall) / Rtot; // W/m
     }
 
-    // 4) 是否推进土壤（Neumann 边界用 q_line_wall_）
+    // 4) ????????????Neumann ????? q_line_wall_??
     if (advanceSoil) {
-        soil_step_ADI_(cfg_.time.timeStep_s);
+        soil_step_ADI_(dt_s);
     }
 
-    // 5) 用线热流积分得到 Q_extracted_kW
+    // 5) ?????????????? Q_extracted_kW
     double Qtot_W = 0.0;
     for (int i = 0; i < N_; ++i) Qtot_W += q_line_wall_[i] * dz_;
     Q_extracted_kW = Qtot_W / 1000.0; // kW
 
-    // 6) 返回井口出水温（内管上行出口）
+    // 6) ??????????��???????��????
     return T_inner_.front();
 
 
 }
 
-// ---- 外管由上到下：分段推进（与土壤等效换热） ----
+// ---- ?????????��?????????????????��????? ----
 void GroundModule::update_outer_downstream_(double T_inlet_C, const std::vector<double>& T_soil_local) {
     const double m_dot = std::max(1e-9, cfg_.fluid.massFlow_kgps);
     const double cp = cfg_.fluid.cp;
@@ -117,7 +118,7 @@ void GroundModule::update_outer_downstream_(double T_inlet_C, const std::vector<
     const double t_p = std::max(1e-6, cfg_.well.pipe_wall_thickness_m);
     const double r_pi = std::max(1e-6, r_po - t_p);
     const double r_bo = std::max(r_bore_, r_po + 1e-6);
-    const double P_f = PI * D_out; // 流体侧换热周长
+    const double P_f = PI * D_out; // ??????????
 
     double T_prev = T_inlet_C;
 
@@ -126,17 +127,16 @@ void GroundModule::update_outer_downstream_(double T_inlet_C, const std::vector<
         const double Nu = cfg_.NuFunc ? cfg_.NuFunc(Re_outer, Pr, z) : (0.023 * std::pow(Re_outer, 0.8) * std::pow(Pr, 0.3));;
         const double h = Nu * cfg_.fluid.k / D_out;              // W/m2-K
 
-        // 单位长度总热阻 R′ (K/W per meter)
+        // resistances per unit length
         const double Rf = 1.0 / std::max(1e-9, h * P_f);
-        const double Rp = std::log(r_po / r_pi) / (2.0 * PI * std::max(1e-9, cfg_.pipe.k));
+        const double k_outer = (cfg_.pipe_k_outer > 0.0 ? cfg_.pipe_k_outer : cfg_.pipe.k);
+        const double Rp = std::log(r_po / r_pi) / (2.0 * PI * std::max(1e-9, k_outer));
         const double Rg = std::log(r_bo / r_po) / (2.0 * PI * std::max(1e-9, cfg_.grout.k));
         const double Rtot = Rf + Rp + Rg;
 
         const double T_wall = T_soil_local[i];
-        const double q_line = (T_prev - T_wall) / Rtot;           // W/m （线热流）
-        const double Q_segW = q_line * dz_;                       // W
-        const double dT = -Q_segW / (m_dot * cp);
-
+        const double q_prime = (T_prev - T_wall) / std::max(1e-12, Rtot); // W/m
+        const double dT = - (q_prime * dz_) / (m_dot * cp);
         T_outer_[i] = T_prev + dT;
         T_prev = T_outer_[i];
     }
@@ -146,34 +146,80 @@ void GroundModule::update_outer_downstream_(double T_inlet_C, const std::vector<
 
 
 
-// ---- 内管由下到上：分段推进（与外管水体换热） ----
+// ---- ??????��???????????????????�h??? ----
 void GroundModule::update_inner_upstream_(double T_bottom_in_C, const std::vector<double>& T_outer_local) {
     const double m_dot = std::max(1e-9, cfg_.fluid.massFlow_kgps); // kg/s
-    const double cp = cfg_.fluid.cp;                             // J/kg-K
-    const double D_inner = std::max(1e-6, cfg_.well.D_inner_m);
-    const double P_inner = PI * D_inner;                              // 内管周长（每米长度）
+    const double cp    = cfg_.fluid.cp;                            // J/kg-K
+    const double rho   = cfg_.fluid.rho;
+    const double mu    = std::max(1e-9, cfg_.fluid.mu);
+    const double kf    = std::max(1e-9, cfg_.fluid.k);             // W/m-K
 
-    double T_prev = T_bottom_in_C; // 井底进入内管的温度（来自外管末端）
+    // Geometry for inner/annulus coupling
+    const double t_p = std::max(1e-6, cfg_.well.pipe_wall_thickness_m);
+    const double D_o_out = std::max(1e-6, cfg_.well.D_outer_m);
+    const double D_o_inn = std::max(1e-6, cfg_.well.D_inner_m);
+    const double D_o_inner_wall = std::max(1e-6, D_o_out - 2.0 * t_p);
+    const double D_i_inner = std::max(1e-6, D_o_inn - 2.0 * t_p);
+    const double r_i_inner = 0.5 * D_i_inner;
+    const double r_i_outer = 0.5 * D_o_inn;
 
-    // 由底向顶：i = N_-1 → 0
+    // Hydraulics cross-sections
+    const double Dh_ann = std::max(1e-6, std::fabs(D_o_inner_wall - D_o_inn));
+    const double A_ann  = std::max(1e-12, 0.25 * PI * (D_o_inner_wall*D_o_inner_wall - D_o_inn*D_o_inn));
+    const double A_in   = std::max(1e-12, 0.25 * PI * (D_i_inner*D_i_inner));
+
+    auto Nu_turb = [](double Re, double Pr){ return 0.023 * std::pow(Re, 0.8) * std::pow(Pr, 0.4); }; // Dittus–Boelter
+    auto Nu_lam  = [](double /*Re*/, double /*Pr*/){ return 4.36; };                                   // laminar, const-q
+    auto blendNu = [&](double Re, double Pr){
+        if (Re < 2000.0) return Nu_lam(Re,Pr);
+        if (Re > 3000.0) return Nu_turb(Re,Pr);
+        double a = (Re - 2000.0) / 1000.0; // linear blend in transition
+        return (1.0 - a) * Nu_lam(Re,Pr) + a * Nu_turb(Re,Pr);
+    };
+
+    const double Pr = cfg_.calcPr();
+    const double h_min = 5.0; // W/m2-K
+
+    double T_prev = T_bottom_in_C;
     for (int i = N_ - 1; i >= 0; --i) {
         const double T_outer = T_outer_local[i];
-        const double q_io = h_inner_outer_ * (T_prev - T_outer); // W/m^2，正值：内管向外管放热
-        const double Q_seg_W = q_io * (P_inner * dz_);
-        const double dT = -Q_seg_W / (m_dot * cp);
 
+        // Reynolds and Nusselt
+        const double v_in  = m_dot / (rho * A_in);
+        const double v_ann = m_dot / (rho * A_ann);
+        const double Re_in  = rho * v_in  * std::max(1e-6, D_i_inner) / mu;
+        const double Re_ann = rho * v_ann * std::max(1e-6, Dh_ann)    / mu;
+        const double Nu_in  = blendNu(std::max(1e-6, Re_in),  std::max(1e-6, Pr));
+        const double Nu_ann = blendNu(std::max(1e-6, Re_ann), std::max(1e-6, Pr));
+        const double h_i = std::max(h_min, Nu_in  * kf / std::max(1e-6, D_i_inner));
+        const double h_o = std::max(h_min, Nu_ann * kf / std::max(1e-6, Dh_ann));
+
+        // Series resistances per unit length
+        const double R_i = 1.0 / std::max(1e-9, h_i * 2.0 * PI * std::max(1e-9, r_i_inner));
+        const double z = zc_[i];
+        double kin = (cfg_.pipe_k_inner > 0.0 ? cfg_.pipe_k_inner : cfg_.pipe.k);
+        if (cfg_.insul.enable && z <= std::max(0.0, cfg_.insul.top_len_m)) {
+            kin = std::max(1e-4, cfg_.insul.k_inner);
+        }
+        const double R_w = std::log(std::max(1e-6, r_i_outer) / std::max(1e-6, r_i_inner)) / (2.0 * PI * std::max(1e-9, kin));
+        const double R_o = 1.0 / std::max(1e-9, h_o * 2.0 * PI * std::max(1e-9, r_i_outer));
+        const double U_per_len = 1.0 / std::max(1e-12, R_i + R_w + R_o);
+
+        // Heat per unit length and temperature drop along dz
+        const double q_prime_Wpm = U_per_len * (T_prev - T_outer);
+        const double dT_raw = - (q_prime_Wpm * dz_) / (m_dot * cp);
+        double dT = dT_raw; if (dT > 10.0) dT = 10.0; else if (dT < -10.0) dT = -10.0;
         T_inner_[i] = T_prev + dT;
         T_prev = T_inner_[i];
     }
-
 }
 
 
 
-// ---- 估算该小时总取热量（kW）：对土壤侧热流积分 ----
+// ---- ?????��??????????kW???????????????????? ----
 double GroundModule::integrate_Q_extracted_kW_(const std::vector<double>& q_wall_Wm2) const {
     const double D_ref = std::max(1e-6, cfg_.well.D_outer_m);
-    const double P_outer = PI * D_ref; // 周长（每米长度）
+    const double P_outer = PI * D_ref; // ????????????
 
     double Q_total_W = 0.0;
     for (int i = 0; i < N_; ++i) {
@@ -194,8 +240,8 @@ void GroundModule::build_soil_grid_() {
         dr *= cfg_.dr_growth;
     }
     Nr_ = static_cast<int>(r_.size());
-    if (Nr_ < 3) { // 防止过少
-        // 回退到至少3层
+    if (Nr_ < 3) { // ???????
+        // ?????????3??
         while (Nr_ < 3) {
             double back = dr_.empty() ? cfg_.dr0_m : dr_.back();
             r_.push_back((r_acc + 0.5 * back));
@@ -216,20 +262,19 @@ void GroundModule::init_soil_field_() {
         }
     }
 }
-// ADI 主入口：先 r-扫，再 z-扫（两步都是半步 dt/2 隐式）
-// 物性用 cfg_.soil（你也可按半径分层扩展）
+// ADI ???????? r-????? z-???????????? dt/2 ?????
 void GroundModule::soil_step_ADI_(double dt_s) {
-    // 半步
-    double half = 0.5 * dt_s;
+    if (Nr_ <= 0 || Nz_ <= 0) return;
+    double half = std::max(1e-9, 0.5 * dt_s);
 
-    // 第一步：沿 r 扫描（每个 iz 独立解一条三对角）
+    // ????????? r ??��??? iz ???????????????
     sweep_r_(half);
 
-    // 第二步：沿 z 扫描（每个 ir 独立解一条三对角）
+    // ????????? z ??��??? ir ???????????????
     sweep_z_(half);
 }
 
-// ---- r-sweep：固定 z，沿 r 解 ----
+// ---- r-sweep????? z???? r ?? ----
 void GroundModule::sweep_r_(double dt_s) {
     const double rho = cfg_.soil.rho;
     const double cp  = cfg_.soil.cp;
@@ -283,7 +328,7 @@ void GroundModule::sweep_r_(double dt_s) {
     }
 }
 
-// ---- z-sweep：固定 r，沿 z 解 ----
+// ---- z-sweep????? r???? z ?? ----
 void GroundModule::sweep_z_(double dt_s) {
     const double rho = cfg_.soil.rho;
     const double cp  = cfg_.soil.cp;
@@ -329,7 +374,7 @@ void GroundModule::sweep_z_(double dt_s) {
     }
 }
 
-// ---- Thomas 三对角求解 ----
+// ---- Thomas ???????? ----
 void GroundModule::thomas_solve_(const std::vector<double>& a,
     const std::vector<double>& b,
     const std::vector<double>& c,
@@ -347,3 +392,6 @@ void GroundModule::thomas_solve_(const std::vector<double>& a,
     x[n - 1] = d2[n - 1];
     for (int i = n - 2; i >= 0; --i) x[i] = d2[i] - c2[i] * x[i + 1];
 }
+
+
+

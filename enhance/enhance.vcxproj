@@ -156,6 +156,7 @@
     <ClInclude Include="Utils.h" />
     <ClInclude Include="LoadModel.h" />
     <ClInclude Include="TankModule.h" />
+    <ClInclude Include="Optimizer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Dataconfig.cpp" />
@@ -167,6 +168,7 @@
     <ClCompile Include="Logger.cpp" />
 
     <ClCompile Include="LoadModel.cpp" />
+    <ClCompile Include="Optimizer.cpp" />
 
 
   </ItemGroup>

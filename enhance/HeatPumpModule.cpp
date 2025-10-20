@@ -63,6 +63,7 @@ static CoolPropDyn g_coolprop;
 #endif
 
 double HeatPumpModule::step(double T_source_out_C,
+    double dt_s,
     double& COP,
     double& Q_out_kW,
     double& P_el_kW) {
@@ -86,11 +87,29 @@ double HeatPumpModule::step(double T_source_out_C,
     if (cfg_.hp.use_coolprop && g_coolprop.try_load()){
         try {
             const std::string& fluid = cfg_.hp.fluid;
-            auto P_evap_Pa = g_coolprop.PropsSI("P","T",Tevap_sat_guard_K,"Q",1.0,fluid.c_str());
-            auto P_cond_Pa = g_coolprop.PropsSI("P","T",Tcond_sat_K,         "Q",0.0,fluid.c_str());
+            // Clamp cycle temperatures to CoolProp-safe domain
+            // Query fluid critical and triple temperatures to avoid out-of-range calls
+            double Tcrit = 0.0, Ttrip = 0.0;
+            try {
+                Tcrit = g_coolprop.PropsSI("Tcrit", "", 0.0, "", 0.0, fluid.c_str());
+                Ttrip = g_coolprop.PropsSI("T_triple", "", 0.0, "", 0.0, fluid.c_str());
+            } catch(...) { /* leave zeros, guard below */ }
+            if (!(Tcrit > 0.0)) Tcrit = 1e9; // very high sentinel
+            if (!(Ttrip > 0.0)) Ttrip = 50.0; // ~50 K sentinel
+
+            // Enforce ordering and margins between evap/cond temperatures
+            constexpr double Kmin = 0.5; // minimal approach margin in K
+            double Tevap_sat = Tevap_sat_guard_K;
+            double Tcond_sat = Tcond_sat_K;
+            // Boundaries
+            Tevap_sat = std::max(Ttrip + Kmin, std::min(Tevap_sat, Tcrit - 5.0));
+            Tcond_sat = std::max(Tevap_sat + 2.0*Kmin, std::min(Tcond_sat, Tcrit - Kmin));
+
+            auto P_evap_Pa = g_coolprop.PropsSI("P","T",Tevap_sat,"Q",1.0,fluid.c_str());
+            auto P_cond_Pa = g_coolprop.PropsSI("P","T",Tcond_sat,         "Q",0.0,fluid.c_str());
             last_debug_.P_evap_kPa = P_evap_Pa/1000.0;
             last_debug_.P_cond_kPa = P_cond_Pa/1000.0;
-            auto T_superheat_K = Tevap_sat_guard_K + cfg_.hp.superheat_K;
+            auto T_superheat_K = std::max(Tevap_sat + Kmin, Tevap_sat + cfg_.hp.superheat_K);
             auto h1 = g_coolprop.PropsSI("H","T",T_superheat_K,"P",P_evap_Pa,fluid.c_str());
             last_debug_.h1 = h1;
             auto s1 = g_coolprop.PropsSI("S","T",T_superheat_K,"P",P_evap_Pa,fluid.c_str());
@@ -98,20 +117,22 @@ double HeatPumpModule::step(double T_source_out_C,
             auto h2  = h1 + (h2s - h1) / (std::max)(0.1, cfg_.hp.eta_isentropic);
             last_debug_.h2s = h2s;
             last_debug_.h2  = h2;
-            auto T_subcool_K = (std::max)(1.0, Tcond_sat_K - cfg_.hp.subcool_K);
+            auto T_subcool_K = (std::max)(Ttrip + Kmin, Tcond_sat - std::max(1.0, cfg_.hp.subcool_K));
+            if (T_subcool_K > Tcond_sat - Kmin) T_subcool_K = Tcond_sat - Kmin;
             auto h3 = g_coolprop.PropsSI("H","T",T_subcool_K,"P",P_cond_Pa,fluid.c_str());
             last_debug_.h3 = h3;
             double num = (h2 - h3);
             double den = (std::max)(1e-6, h2 - h1);
             COP = num/den;
             // Sanity bound COP with Carnot-based efficiency ceiling and a hard cap
-            double T_evap_K = Tevap_sat_guard_K + cfg_.hp.superheat_K;
-            double T_cond_K = (std::max)(1.0, Tcond_sat_K - cfg_.hp.subcool_K);
+            double T_evap_K = T_superheat_K;
+            double T_cond_K = T_subcool_K + std::max(1.0, cfg_.hp.subcool_K);
             if (T_cond_K - T_evap_K < 1.0) T_evap_K = T_cond_K - 1.0;
             double COP_carnot = (T_cond_K > T_evap_K + 1e-6) ? (T_cond_K / (T_cond_K - T_evap_K)) : 1.0;
             double eff = cfg_.hp.eff_carnot * (0.9 * cfg_.hp.eta_isentropic + 0.1);
-            double COP_cap = (std::max)(1.0, eff * COP_carnot);
-            COP = clampd(COP, 1.0, (std::min)(8.0, COP_cap));
+            // remove COP upper cap; keep lower bound for stability
+            if (!std::isfinite(COP) || COP <= 0.0) COP = 1.0;
+            COP = (std::max)(1.0, COP);
             used_cp = std::isfinite(COP);
             last_debug_.used_coolprop = used_cp;
             if (!used_cp && !warned_failure){
@@ -131,7 +152,8 @@ double HeatPumpModule::step(double T_source_out_C,
         if (T_cond_K - T_evap_K < dT_min) T_evap_K = T_cond_K - dT_min;
         double COP_carnot = (T_cond_K > T_evap_K + 1e-6) ? (T_cond_K / (T_cond_K - T_evap_K)) : 1.0;
         double eff = cfg_.hp.eff_carnot * (0.9 * cfg_.hp.eta_isentropic + 0.1);
-        COP = clampd(eff * COP_carnot, 1.5, 8.0);
+        // remove COP upper cap in fallback
+        COP = (std::max)(1.5, eff * COP_carnot);
     }
 
     double Q_target = (std::max)(0.0, cfg_.hp.Q_demand_kW);
@@ -152,7 +174,14 @@ double HeatPumpModule::step(double T_source_out_C,
     const double cp    = cfg_.fluid.cp;
 
     // Compute capacity limit from source dT cap and nameplate
-    double dT_cap = cfg_.hp.max_source_dT_per_hour; // K per hour on source
+    // If HP_MAX_SRC_DT_PER_H <= 0, disable this cap and rely on freeze guard only.
+    double dt_hr = (dt_s > 0.0 ? (dt_s / 3600.0) : 0.0);
+    double dT_cap = 0.0; // K per step
+    if (cfg_.hp.max_source_dT_per_hour > 0.0) {
+        dT_cap = cfg_.hp.max_source_dT_per_hour * (dt_hr > 0.0 ? dt_hr : 1.0);
+    } else {
+        dT_cap = 1e9; // effectively no cap; limited by freeze guard below
+    }
     // also enforce freeze guard safety on this step
     double max_drop_to_guard = std::max(0.0, T_source_out_C - cfg_.hp.min_source_return_C);
     dT_cap = std::min(dT_cap, max_drop_to_guard);
@@ -170,13 +199,14 @@ double HeatPumpModule::step(double T_source_out_C,
     // Back-compute source dT actually used
     double Q_geo_served_kW = Q_out_kW * (1.0 - 1.0 / COP);
     double dT_need = (Q_geo_served_kW * 1000.0) / (m_dot * cp);
-    dT_need = std::clamp(dT_need, 0.0, dT_cap);
+    dT_need = clampd(dT_need, 0.0, dT_cap);
 
     double T_return_C = T_source_out_C - dT_need;
     if (T_return_C < cfg_.hp.min_source_return_C) T_return_C = cfg_.hp.min_source_return_C;
 
     return T_return_C;
 }
+
 
 
 

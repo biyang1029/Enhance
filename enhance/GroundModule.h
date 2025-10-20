@@ -16,7 +16,7 @@ public:
 
     // 输入：回水温（内管出口 → 外管入口的回到地热侧的水温）
     // 输出：该小时的井口出水温（内管出口）；并通过引用返回从地层提取的热量（kW）
-    double step(double T_return_C, double& Q_extracted_kW, bool advanceSoil = true);
+    double step(double T_return_C, double& Q_extracted_kW, double dt_s, bool advanceSoil = true);
     void setMassFlow(double kgps) { cfg_.fluid.massFlow_kgps = kgps; }
 
     int    getNz() const { return Nz_; }

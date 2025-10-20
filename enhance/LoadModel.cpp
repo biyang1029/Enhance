@@ -1,4 +1,4 @@
-#include "LoadModel.h"
+﻿#include "LoadModel.h"
 #include "DataConfig.h"
 #include <algorithm>
 #include <fstream>
@@ -41,6 +41,11 @@ bool LoadModel::loadCSV(const std::string& path, const std::string& column){
 }
 
 double LoadModel::demandAt(int hourIndex, const LoadConfig& cfg) const{
+    if (cfg.enable_cutoff) {
+        double ToutCut = cfg.indoor_T_C;
+        if ( !toutC_.empty() && hourIndex >= 0){ ToutCut = toutC_[hourIndex % toutC_.size()]; } 
+        if (ToutCut >= cfg.heat_cutoff_C) return 0.0;
+    }
     if (!cfg.enable_weather) return cfg.base_kW;
     double Tout = cfg.indoor_T_C;
     if (!toutC_.empty() && hourIndex >= 0){
