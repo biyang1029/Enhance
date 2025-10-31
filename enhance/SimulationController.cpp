@@ -209,10 +209,9 @@ if (!flow_cfg_inited) {
             T_next = clampd(T_next, T_min_phys, T_max_phys);
             if (!std::isfinite(T_next)) T_next = T_iter;
             // limit per-iteration jump to avoid divergence
-            const double max_dT_iter = 10.0; // K per inner iteration
-            double dT = std::clamp(T_next - T_iter, -max_dT_iter, max_dT_iter);
+            dT = clampd(T_next - T_iter, -max_dT_iter, max_dT_iter);
             T_next = T_iter + dT;
-            T_next = std::clamp(T_next, T_min_phys, T_max_phys);
+            T_next = clampd(T_next, T_min_phys, T_max_phys);
             if (std::fabs(T_next - T_iter) < tolT) break;
             T_iter = relax * T_next + (1.0 - relax) * T_iter;
         }
@@ -224,7 +223,7 @@ if (!flow_cfg_inited) {
         if (!std::isfinite(T_return_next)) T_return_next = T_iter;
         T_return_next = clampd(T_return_next, T_min_phys, T_max_phys);
         if (!std::isfinite(T_return_next)) T_return_next = T_iter;
-        T_return_next = std::clamp(T_return_next, T_min_phys, T_max_phys);
+        T_return_next = clampd(T_return_next, T_min_phys, T_max_phys);
 
         double Q_space_served_kW = 0.0, Q_dhw_served_kW = 0.0, Q_unmet_kW = 0.0;
         tank_.applyHour(dt_s, Q_out_kW, Q_space_req_kW, Q_dhw_req_kW,
@@ -398,6 +397,7 @@ if (!flow_cfg_inited) {
     std::cout << "Simulation finished. Results at: " << csv_path << "\n";
     return true;
 }
+
 
 
 
