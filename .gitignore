@@ -1,70 +1,37 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
-# ===== Custom ignore for geothermal simulation project =====
-# Visual Studio cache
+﻿# Visual Studio / C++
 .vs/
-.vscode/
+*.vcxproj.user
+*.suo
+*.user
+*.log
+*.tlog
+*.ipch
+*.opendb
+*.VC.db
+*.VC.opendb
 
 # Build outputs
 x64/
-x86/
-Release/
 Debug/
-
-# REFPROP binary files (local library, not tracked)
+Release/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.pch
+*.exp
 *.lib
-*.dll
 *.exe
+*.dll
 
-# Simulation outputs
-*.log
-*.csv
-*.out
-*.dat
-*.tmp
+# Local runs / results
+enhance/results.csv
+enhance/debug.csv
+enhance/summary.csv
+runs_*/
+opt_runs*/
 
-# User-specific and system files
-*.user
-*.suo
-*.db
-*.cache
-*.ipch
+# OS / editor
+Thumbs.db
+.DS_Store
+*.swp
