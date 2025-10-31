@@ -1,8 +1,7 @@
 <#
-  扫参脚本（PowerShell）— 放在项目根目录 enhance 下
-  运行方法：
-    1) 右键本文件 -> 使用 PowerShell 运行
-    2) 或终端执行：powershell -NoProfile -ExecutionPolicy Bypass -File .\sweep.ps1
+  Sweep script (ASCII-only) for enhance project root.
+  Run:
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\sweep.ps1
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -21,23 +20,23 @@ function Find-EnhanceExe([string]$baseDir){
   foreach($p in $candidates){ if(Test-Path $p){ return (Resolve-Path $p).Path } }
   $found = Get-ChildItem -Path $baseDir -Filter 'enhance.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
   if($found){ return $found.FullName }
-  throw '未找到 enhance.exe，请先编译 (Release|x64) 或设置 ENHANCE_EXE 环境变量。'
+  throw 'enhance.exe not found. Build Release|x64 or set ENHANCE_EXE.'
 }
 
 $exe = Find-EnhanceExe $ScriptDir
 Write-Host "[Info] exe: $exe"
 
-# 参数网格（可按需调整）
-$hpList    = @(600)
-$dtList    = @(0)           # 源侧每小时最大降温 (K/h)；0=关闭
+# parameter grids (edit as needed)
+$hpList    = @(150)
+$dtList    = @(0)
 $uaList    = @(22,30)
-$mfList    = @(10)          # 源侧质量流量 (kg/s)
+$mfList    = @(10)
 $effCarnotList    = @(0.65)
 $evapApproachList = @(3.0)
 $condApproachList = @(3.0)
 $modRangeList     = @(1.0)
 
-# 几何与材料
+# geometry & materials
 $dOuterList  = @(0.20)
 $dInnerList  = @(0.10)
 $boreList    = @(0.22)
@@ -46,29 +45,29 @@ $soilKList   = @(2.5)
 $soilRhoList = @(2600)
 $soilCpList  = @(1600)
 $groutKList  = @(4)
-$pipeKInnerList = @(0.4)     # PE-RT II
-$pipeKOuterList = @(4.0)     # J55 钢
-$insulTopLenList = @(100)    # m 顶段等效保温长度
+$pipeKInnerList = @(0.4)
+$pipeKOuterList = @(4.0)
+$insulTopLenList = @(100)
 $insulKInnerList = @(0.1)
-$enhBottomLenList= @(100)    # m 底部增强长度
+$enhBottomLenList= @(100)
 
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
 $runRoot = Join-Path $ScriptDir ("runs_"+$ts)
 New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
 
-# 基础环境
+# base env
 $env:SIM_YEARS   = '1'
 $env:TIME_STEP_S = '600'
 $env:LOG_HOURLY  = '1'
 
-# 供暖季（10/15-4/15）
+# heating season (Oct-15..Apr-15)
 $env:HEAT_SEASON_ENABLE = '1'
 $env:HEAT_START_MM = '10'
 $env:HEAT_START_DD = '15'
 $env:HEAT_END_MM   = '4'
 $env:HEAT_END_DD   = '15'
 
-# 天气与高温切断
+# weather & cutoff
 $weather1 = Join-Path $ScriptDir 'weather_gansu.csv'
 $weather2 = Join-Path (Join-Path $ScriptDir 'enhance') 'weather_gansu.csv'
 if (Test-Path $weather1) { $env:LOAD_WEATHER_CSV = $weather1 }
@@ -79,16 +78,14 @@ $env:LOAD_HEAT_CUTOFF_C = '26'
 $env:LOAD_BASE_KW = '0'
 $env:LOAD_INDOOR_T = '26'
 
-# 热泵保护/调制
+# hp guards
 $env:HP_MIN_SRC_RETURN_C = '10'
 $env:HP_MOD_RANGE_C      = '1'
 
-# summary 头
 $summaryFile = Join-Path $runRoot 'summary_runs.csv'
 "hp_max_kW,UA_kWperK,flow_src_kgps,flow_load_kgps,set_load_out_C,tank_vol_m3,Q_load_kWh,Q_src_kWh,P_el_kWh,P_pump_kWh,dP_kPa_avg,avg_Q_load_kW,avg_Q_src_kW,COP_annual,COP_measured,COP_delta,HP_on_hours,HP_on_measured,HP_on_delta" | Set-Content -Path $summaryFile -Encoding UTF8
 
 function Run-OneCombo([double]$hp,[double]$dt,[double]$ua,[double]$mf,[double]$effCar,[double]$evapK,[double]$condK,[double]$modC,[double]$pkIn,[double]$pkOut,[double]$insTop,[double]$insKin,[double]$enhB,[double]$dOuter,[double]$dInner,[double]$bore,[double]$tPipe,[double]$soilK,[double]$soilRho,[double]$soilCp,[double]$groutK){
-  # 写环境变量
   $env:HP_MAX_Q_OUT_KW     = [string]$hp
   $env:HP_MAX_SRC_DT_PER_H = [string]$dt
   $env:LOAD_UA_KW_PER_K    = [string]$ua
@@ -111,7 +108,6 @@ function Run-OneCombo([double]$hp,[double]$dt,[double]$ua,[double]$mf,[double]$e
   $env:INSUL_K_INNER       = [string]$insKin
   $env:EHEP_BOTTOM_LEN_M   = [string]$enhB
 
-  # 参考值（实测）
   $HP_on_measured = 2890.0
   $COP_measured   = 4.3
 
@@ -123,9 +119,8 @@ function Run-OneCombo([double]$hp,[double]$dt,[double]$ua,[double]$mf,[double]$e
     if (-not $env:FLOW_LOAD_KGPS) { $env:FLOW_LOAD_KGPS = '22.2' }
     & $exe
   Pop-Location
-  if($LASTEXITCODE -ne 0){ Write-Warning "进程退出码 $LASTEXITCODE" }
+  if($LASTEXITCODE -ne 0){ Write-Warning "process exit code $LASTEXITCODE" }
 
-  # 归档输出
   $tagDt = ([string]$dt) -replace '\.','p'
   $tag = "hp_${hp}_dt${tagDt}_ua${ua}_mf${mf}_ec${effCar}_ea${evapK}_ca${condK}_mr${modC}_kin${pkIn}_kout${pkOut}_ins${insTop}m_${insKin}_enh${enhB}m_do${dOuter}_di${dInner}_bd${bore}_tp${tPipe}"
   $resOut = Join-Path $runRoot ("results_"+$tag+".csv")
@@ -133,7 +128,6 @@ function Run-OneCombo([double]$hp,[double]$dt,[double]$ua,[double]$mf,[double]$e
   if(Test-Path (Join-Path $ScriptDir 'results.csv')){ Copy-Item (Join-Path $ScriptDir 'results.csv') $resOut -Force }
   if(Test-Path (Join-Path $ScriptDir 'debug.csv'))  { Copy-Item (Join-Path $ScriptDir 'debug.csv')  $dbgOut -Force }
 
-  # 汇总（每小时一行，直接累加即为 kWh）
   if(Test-Path $resOut){
     $rows = Import-Csv -Path $resOut
     if($rows.Count -gt 0){
@@ -223,5 +217,4 @@ foreach($hp in $hpList){
   }
 }
 
-Write-Host "[Done] 输出目录: $runRoot"
-
+Write-Host "[Done] output: $runRoot"

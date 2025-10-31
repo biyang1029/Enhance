@@ -1,10 +1,11 @@
-#ifdef _MSC_VER
+﻿#ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS 1
 #endif
 #include "DataConfig.h"
 #include "SimulationController.h"
 #include "Optimizer.h"
 #include <cstdlib>
+#include <algorithm>
 #include <string>
 #include <sstream>
 #ifdef _OPENMP
@@ -14,10 +15,10 @@
 int main() {
     // Set default OpenMP threads to 50% of logical processors unless user overrides via OMP_NUM_THREADS
 #ifdef _OPENMP
-    // 默认固定 16 线程；如设置了以下环境变量则覆盖：
-    //   OMP_THREADS（线程数）或 OMP_NUM_THREADS（标准 OpenMP 变量）
-    //   OMP_THREADS_PCT（按总逻辑核百分比 1..100 计算）
-    int threads = 16;
+    // 榛樿鍥哄畾 16 绾跨▼锛涘璁剧疆浜嗕互涓嬬幆澧冨彉閲忓垯瑕嗙洊锛?
+    //   OMP_THREADS锛堢嚎绋嬫暟锛夋垨 OMP_NUM_THREADS锛堟爣鍑?OpenMP 鍙橀噺锛?
+    //   OMP_THREADS_PCT锛堟寜鎬婚€昏緫鏍哥櫨鍒嗘瘮 1..100 璁＄畻锛?
+    int threads = 12;
     if (const char* v = std::getenv("OMP_THREADS")) {
         try { int t = std::stoi(v); if (t > 0) threads = t; } catch(...) {}
     } else if (const char* v = std::getenv("OMP_NUM_THREADS")) {
@@ -33,7 +34,7 @@ int main() {
         } catch(...) {}
     }
     if (threads < 1) threads = 1;
-    omp_set_dynamic(0);            // 固定线程数，避免自动缩放导致占用忽高忽低
+    omp_set_dynamic(0);            // 鍥哄畾绾跨▼鏁帮紝閬垮厤鑷姩缂╂斁瀵艰嚧鍗犵敤蹇介珮蹇戒綆
     omp_set_num_threads(threads);
 #endif
     // Non-interactive defaults; allow overrides via environment variables
@@ -85,7 +86,7 @@ int main() {
 
     // Pipe material: set PE-like conductivity by default (reduce short-circuiting)
     // Thickness stays unchanged; override via PIPE_K if needed.
-    CFG.pipe.k = 0.4; // W/m-K (typical PE/PEX ~0.35–0.45)
+    CFG.pipe.k = 0.4; // W/m-K (typical PE/PEX ~0.35鈥?.45)
     if (const char* v = std::getenv("PIPE_K"))             try { CFG.pipe.k = std::stod(v);} catch(...) {}
 
     // Geometry and ground overrides (optional)
@@ -209,4 +210,5 @@ int main() {
     }
     return 0;
 }
+
 
