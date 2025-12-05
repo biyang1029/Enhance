@@ -1,4 +1,4 @@
-<#
+﻿<#
   Sweep script (ASCII-only) for enhance project root.
   Run:
     powershell -NoProfile -ExecutionPolicy Bypass -File .\sweep.ps1
@@ -27,10 +27,10 @@ $exe = Find-EnhanceExe $ScriptDir
 Write-Host "[Info] exe: $exe"
 
 # parameter grids (edit as needed)
-$hpList    = @(150)
+$hpList    = @(350)
 $dtList    = @(0)
-$uaList    = @(22,30)
-$mfList    = @(10)
+$uaList    = @(40)
+$mfList    = @(5)
 $effCarnotList    = @(0.65)
 $evapApproachList = @(3.0)
 $condApproachList = @(3.0)
@@ -130,29 +130,29 @@ function Run-OneCombo([double]$hp,[double]$dt,[double]$ua,[double]$mf,[double]$e
 
   if(Test-Path $resOut){
     $rows = Import-Csv -Path $resOut
-    if($rows.Count -gt 0){
+    if($rows.Count -gt 0){`r`n      function ToDouble($v){ try { $d = [double]$v } catch { return 0.0 }; if([double]::IsNaN($d) -or [double]::IsInfinity($d)){ return 0.0 } $d }
       $sumQspace=0.0; $sumQdhw=0.0; $sumPel=0.0; $sumPpump=0.0; $sumQsrc=0.0
       $sumDP=0.0; $sumQoutInst=0.0; $sumQsrcInst=0.0; $onRows=0
       $sumFlowSrc=0.0; $sumFlowLoad=0.0
       foreach($r in $rows){
-        $qs = [double]$r.Q_space_served_kW
-        $qd = [double]$r.Q_dhw_served_kW
-        $pe = [double]$r.P_el_kW
-        $pp = [double]$r.P_pump_kW
-        $qg = 0.0; if($r.PSObject.Properties.Name -contains 'Q_geo_kW'){ $qg = [double]$r.Q_geo_kW }
+        $qs = ToDouble $r.Q_space_served_kW
+        $qd = ToDouble $r.Q_dhw_served_kW
+        $pe = ToDouble $r.P_el_kW
+        $pp = ToDouble $r.P_pump_kW
+        \$qg = 0.0; if($r.PSObject.Properties.Name -contains 'Q_geo_kW'){ $qg = ToDouble $r.Q_geo_kW }
         $sumQspace += $qs
         $sumQdhw   += $qd
         $sumPel    += $pe
         $sumPpump  += $pp
         $sumQsrc   += $qg
-        $on = 0; try { $on = [int][double]$r.HP_on } catch {}
+        $on = 0; try { $on = [int](ToDouble $r.HP_on) } catch {}
         if($on -gt 0){
           $onRows += 1
-          if($r.PSObject.Properties.Name -contains 'dP_kPa'){ $sumDP += [double]$r.dP_kPa }
-          if($r.PSObject.Properties.Name -contains 'Q_out_kW'){ $sumQoutInst += [double]$r.Q_out_kW }
-          if($r.PSObject.Properties.Name -contains 'Q_geo_kW'){ $sumQsrcInst += [double]$r.Q_geo_kW }
-          if($r.PSObject.Properties.Name -contains 'flow_src_kgps'){ $sumFlowSrc += [double]$r.flow_src_kgps }
-          if($r.PSObject.Properties.Name -contains 'flow_load_kgps'){ $sumFlowLoad += [double]$r.flow_load_kgps }
+          if($r.PSObject.Properties.Name -contains 'dP_kPa'){ $sumDP += ToDouble $r.dP_kPa }
+          if($r.PSObject.Properties.Name -contains 'Q_out_kW'){ $sumQoutInst += ToDouble $r.Q_out_kW }
+          if($r.PSObject.Properties.Name -contains 'Q_geo_kW'){ $sumQsrcInst += ToDouble $r.Q_geo_kW }
+          if($r.PSObject.Properties.Name -contains 'flow_src_kgps'){ $sumFlowSrc += ToDouble $r.flow_src_kgps }
+          if($r.PSObject.Properties.Name -contains 'flow_load_kgps'){ $sumFlowLoad += ToDouble $r.flow_load_kgps }
         }
       }
       $Q_load_kWh = $sumQspace + $sumQdhw
@@ -218,3 +218,4 @@ foreach($hp in $hpList){
 }
 
 Write-Host "[Done] output: $runRoot"
+

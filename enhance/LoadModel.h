@@ -11,6 +11,7 @@ public:
     bool loadCSV(const std::string& path, const std::string& column);
     double demandAt(int hourIndex, const LoadConfig& cfg) const;
     double dhwAt(int hourIndex, const DHWConfig& cfg) const;
+    double toutAt(int hourIndex, double fallback) const;
 private:
     std::vector<double> toutC_; // outdoor temperature per step
 };

@@ -1,6 +1,9 @@
-﻿#include "HeatPumpModule.h"
+﻿#define _CRT_SECURE_NO_WARNINGS 1
+#include "HeatPumpModule.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
+#include <limits>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -76,11 +79,43 @@ double HeatPumpModule::step(double T_source_out_C,
     const double Tevap_sat_guard_K = (std::max)(Tevap_sat_K, (T_freeze_C + 0.1) + 273.15);
 
     bool used_cp = false;
-    // reset debug
+    const double T_evap_floor_K = cfg_.hp.evap_T_min_C + 273.15;
+    const double T_cond_ceiling_K = cfg_.hp.cond_T_max_C + 273.15;
+    const double min_temp_lift_K = std::max(1.0, cfg_.hp.min_temp_lift_K);
+
+    auto enforce_cycle_bounds = [&](double& TevapK, double& TcondK) -> bool {
+        if (!(std::isfinite(TevapK) && std::isfinite(TcondK))) return false;
+        if (T_cond_ceiling_K - T_evap_floor_K < min_temp_lift_K) return false;
+        TevapK = std::max(T_evap_floor_K, TevapK);
+        TcondK = std::min(T_cond_ceiling_K, TcondK);
+        if (TcondK - TevapK < min_temp_lift_K) {
+            double mid = 0.5 * (TcondK + TevapK);
+            TevapK = mid - 0.5 * min_temp_lift_K;
+            TcondK = TevapK + min_temp_lift_K;
+            TevapK = std::max(T_evap_floor_K, TevapK);
+            TcondK = std::min(T_cond_ceiling_K, TcondK);
+            if (TcondK - TevapK < min_temp_lift_K - 1e-6) return false;
+        }
+        return true;
+    };
+
+    double Tevap_cycle_K = Tevap_sat_guard_K;
+    double Tcond_cycle_K = Tcond_sat_K;
+    if (!enforce_cycle_bounds(Tevap_cycle_K, Tcond_cycle_K)) {
+        static bool warned_cycle_bounds = false;
+        if (!warned_cycle_bounds) {
+            std::cerr << "[Warning] Heat pump cycle bounds infeasible; HP output forced to zero.\n";
+            warned_cycle_bounds = true;
+        }
+        Q_out_kW = 0.0;
+        P_el_kW  = 0.0;
+        COP      = 0.0;
+        return T_source_out_C;
+    }    // reset debug
     last_debug_ = HPDebug{};
     last_debug_.fluid = cfg_.hp.fluid;
-    last_debug_.T_evap_sat_K = Tevap_sat_K;
-    last_debug_.T_cond_sat_K = Tcond_sat_K;
+    last_debug_.T_evap_sat_K = Tevap_cycle_K;
+    last_debug_.T_cond_sat_K = Tcond_cycle_K;
     static bool warned_failure = false;
 
 #ifdef _WIN32
@@ -88,19 +123,26 @@ double HeatPumpModule::step(double T_source_out_C,
         try {
             const std::string& fluid = cfg_.hp.fluid;
             // Clamp cycle temperatures to CoolProp-safe domain
-            // Query fluid critical and triple temperatures to avoid out-of-range calls
-            double Tcrit = 0.0, Ttrip = 0.0;
-            try {
-                Tcrit = g_coolprop.PropsSI("Tcrit", "", 0.0, "", 0.0, fluid.c_str());
-                Ttrip = g_coolprop.PropsSI("T_triple", "", 0.0, "", 0.0, fluid.c_str());
-            } catch(...) { /* leave zeros, guard below */ }
-            if (!(Tcrit > 0.0)) Tcrit = 1e9; // very high sentinel
-            if (!(Ttrip > 0.0)) Ttrip = 50.0; // ~50 K sentinel
+            // Query fluid critical and triple temperatures once per fluid to avoid repeated calls
+            static std::string lastFluid;
+            static double Tcrit_cached = 0.0, Ttrip_cached = 0.0;
+            static bool fluidInfoReady = false;
+            if (fluid != lastFluid || !fluidInfoReady) {
+                Tcrit_cached = 0.0; Ttrip_cached = 0.0; fluidInfoReady = false;
+                try {
+                    Tcrit_cached = g_coolprop.PropsSI("Tcrit", "", 0.0, "", 0.0, fluid.c_str());
+                    Ttrip_cached = g_coolprop.PropsSI("T_triple", "", 0.0, "", 0.0, fluid.c_str());
+                } catch(...) { /* keep defaults */ }
+                lastFluid = fluid;
+                fluidInfoReady = true;
+            }
+            double Tcrit = (Tcrit_cached > 0.0) ? Tcrit_cached : 1e9; // very high sentinel
+            double Ttrip = (Ttrip_cached > 0.0) ? Ttrip_cached : 50.0; // ~50 K sentinel
 
             // Enforce ordering and margins between evap/cond temperatures
-            constexpr double Kmin = 0.5; // minimal approach margin in K
-            double Tevap_sat = Tevap_sat_guard_K;
-            double Tcond_sat = Tcond_sat_K;
+            constexpr double Kmin = 2.0; // minimal approach margin in K
+            double Tevap_sat = Tevap_cycle_K;
+            double Tcond_sat = Tcond_cycle_K;
             // Boundaries
             Tevap_sat = std::max(Ttrip + Kmin, std::min(Tevap_sat, Tcrit - 5.0));
             Tcond_sat = std::max(Tevap_sat + 2.0*Kmin, std::min(Tcond_sat, Tcrit - Kmin));
@@ -132,6 +174,7 @@ double HeatPumpModule::step(double T_source_out_C,
             double eff = cfg_.hp.eff_carnot * (0.9 * cfg_.hp.eta_isentropic + 0.1);
             // remove COP upper cap; keep lower bound for stability
             if (!std::isfinite(COP) || COP <= 0.0) COP = 1.0;
+
             COP = (std::max)(1.0, COP);
             used_cp = std::isfinite(COP);
             last_debug_.used_coolprop = used_cp;
@@ -146,14 +189,13 @@ double HeatPumpModule::step(double T_source_out_C,
 #endif
 
     if (!used_cp){
-        double T_evap_K = Tevap_sat_guard_K + cfg_.hp.superheat_K;
-        double T_cond_K = Tcond_sat_K - cfg_.hp.subcool_K;
+        double T_evap_K = Tevap_cycle_K + cfg_.hp.superheat_K;
+        double T_cond_K = Tcond_cycle_K - cfg_.hp.subcool_K;
         const double dT_min = 5.0;
         if (T_cond_K - T_evap_K < dT_min) T_evap_K = T_cond_K - dT_min;
         double COP_carnot = (T_cond_K > T_evap_K + 1e-6) ? (T_cond_K / (T_cond_K - T_evap_K)) : 1.0;
         double eff = cfg_.hp.eff_carnot * (0.9 * cfg_.hp.eta_isentropic + 0.1);
-        // remove COP upper cap in fallback
-        COP = (std::max)(1.5, eff * COP_carnot);
+        COP = (std::max)(1.5, eff * COP_carnot); /* fallback path */
     }
 
     double Q_target = (std::max)(0.0, cfg_.hp.Q_demand_kW);
@@ -183,18 +225,40 @@ double HeatPumpModule::step(double T_source_out_C,
         dT_cap = 1e9; // effectively no cap; limited by freeze guard below
     }
     // also enforce freeze guard safety on this step
-    double max_drop_to_guard = std::max(0.0, T_source_out_C - cfg_.hp.min_source_return_C);
-    dT_cap = std::min(dT_cap, max_drop_to_guard);
+    double max_drop_to_guard = 0.0; if (cfg_.hp.min_source_return_C > 0.0) max_drop_to_guard = std::max(0.0, T_source_out_C - cfg_.hp.min_source_return_C);
+    if (cfg_.hp.min_source_return_C > 0.0) dT_cap = std::min(dT_cap, max_drop_to_guard);
     if (COP <= 1.0 || dT_cap <= 0.0) {
         Q_out_kW = 0.0; P_el_kW = 0.0; return T_source_out_C; // no capacity
     }
     const double Q_out_cap_src_kW = (COP / (COP - 1.0)) * (m_dot * cp * dT_cap) / 1000.0;
 
+    // Additional physical cap from evaporator UA-LMTD (limits minimum return temperature)
+    // Environment override: HP_UA_SRC_KW_PER_K (>0 enables this cap). Default: 5 kW/K
+    static bool ua_inited=false; static double UA_kWperK=60.0;
+    if(!ua_inited){
+        if(const char* v=std::getenv("HP_UA_SRC_KW_PER_K")){ try{ UA_kWperK=std::stod(v);}catch(...){} }
+        ua_inited=true;
+    }
+    double Q_out_cap_UA_kW = 1e18;
+    if (UA_kWperK > 0.0) {
+        const double T_evap_C = Tevap_cycle_K - 273.15;
+        const double approach = std::max(1.0, cfg_.hp.evap_approach_K);
+        const double T_out_min_C = T_evap_C + approach; // physical lower bound at exchanger outlet
+        double dT1 = T_source_out_C - T_evap_C;
+        double dT2 = T_out_min_C    - T_evap_C;
+        if (dT1 > 1e-6 && dT2 > 1e-6) {
+            double LMTD = (std::fabs(dT1 - dT2) < 1e-6) ? 0.5 * (dT1 + dT2) : ((dT1 - dT2) / std::log(dT1 / dT2));
+            LMTD = std::max(0.0, LMTD);
+            double Q_geo_cap_UA_kW = UA_kWperK * LMTD;
+            if (COP > 1.0) Q_out_cap_UA_kW = (COP / (COP - 1.0)) * Q_geo_cap_UA_kW;
+        }
+    }
+
     // Demand after modulation (freeze-guard scale already applied in Q_target)
     double Q_out_demand_kW = Q_target;
     // Final served output limited by source capacity + nameplate
-    Q_out_kW = std::max(0.0, std::min({ Q_out_demand_kW, Q_out_cap_src_kW, cfg_.hp.max_Q_out_kW }));
-    P_el_kW  = Q_out_kW / COP;
+    Q_out_kW = std::max(0.0, std::min({ Q_out_demand_kW, Q_out_cap_src_kW, Q_out_cap_UA_kW, cfg_.hp.max_Q_out_kW }));
+    P_el_kW  = (Q_out_kW > 0.0 ? Q_out_kW / COP : 0.0);
 
     // Back-compute source dT actually used
     double Q_geo_served_kW = Q_out_kW * (1.0 - 1.0 / COP);
@@ -202,10 +266,20 @@ double HeatPumpModule::step(double T_source_out_C,
     dT_need = clampd(dT_need, 0.0, dT_cap);
 
     double T_return_C = T_source_out_C - dT_need;
-    if (T_return_C < cfg_.hp.min_source_return_C) T_return_C = cfg_.hp.min_source_return_C;
+    if (cfg_.hp.min_source_return_C > 0.0 && T_return_C < cfg_.hp.min_source_return_C) T_return_C = cfg_.hp.min_source_return_C;
 
     return T_return_C;
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

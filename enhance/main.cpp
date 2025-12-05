@@ -15,10 +15,13 @@
 int main() {
     // Set default OpenMP threads to 50% of logical processors unless user overrides via OMP_NUM_THREADS
 #ifdef _OPENMP
-    // 榛樿鍥哄畾 16 绾跨▼锛涘璁剧疆浜嗕互涓嬬幆澧冨彉閲忓垯瑕嗙洊锛?
-    //   OMP_THREADS锛堢嚎绋嬫暟锛夋垨 OMP_NUM_THREADS锛堟爣鍑?OpenMP 鍙橀噺锛?
-    //   OMP_THREADS_PCT锛堟寜鎬婚€昏緫鏍哥櫨鍒嗘瘮 1..100 璁＄畻锛?
-    int threads = 12;
+   
+    int procs = 1; try { procs = omp_get_num_procs(); }
+    catch (...) { procs = 1; }
+    long long default_t = (static_cast<long long>(procs) * 50 + 99) / 100;
+    int threads = (int)std::max(1LL, default_t);
+
+    // You can customize the number of threads to be used in the environment variables.
     if (const char* v = std::getenv("OMP_THREADS")) {
         try { int t = std::stoi(v); if (t > 0) threads = t; } catch(...) {}
     } else if (const char* v = std::getenv("OMP_NUM_THREADS")) {
@@ -34,8 +37,10 @@ int main() {
         } catch(...) {}
     }
     if (threads < 1) threads = 1;
-    omp_set_dynamic(0);            // 鍥哄畾绾跨▼鏁帮紝閬垮厤鑷姩缂╂斁瀵艰嚧鍗犵敤蹇介珮蹇戒綆
+    omp_set_dynamic(0);           
     omp_set_num_threads(threads);
+
+
 #endif
     // Non-interactive defaults; allow overrides via environment variables
     if (const char* v = std::getenv("HP_USE_COOLPROP")) { CFG.hp.use_coolprop = (*v!='0' && *v!='n' && *v!='N'); }
@@ -50,9 +55,11 @@ int main() {
     if (const char* v = std::getenv("HP_MAX_Q_OUT_KW")) try { CFG.hp.max_Q_out_kW  = std::stod(v); } catch(...) {}
     if (const char* v = std::getenv("HP_MAX_SRC_DT_PER_H")) try { CFG.hp.max_source_dT_per_hour = std::stod(v); } catch(...) {}
     if (const char* v = std::getenv("HP_MIN_SRC_RETURN_C")) try { CFG.hp.min_source_return_C    = std::stod(v); } catch(...) {}
-    // Default: enable simple weather-driven load using weather.csv in working directory
+    if (const char* v = std::getenv("HP_EVAP_T_MIN_C"))   try { CFG.hp.evap_T_min_C   = std::stod(v); } catch(...) {}
+    if (const char* v = std::getenv("HP_COND_T_MAX_C"))   try { CFG.hp.cond_T_max_C   = std::stod(v); } catch(...) {}
+    if (const char* v = std::getenv("HP_MIN_TEMP_LIFT_K")) try { CFG.hp.min_temp_lift_K = std::stod(v); } catch(...) {}
+    // Default: enable weather-driven load; file name default由 DataConfig.h / env 决定
     CFG.load.enable_weather = true;
-    CFG.load.weather_csv = "weather.csv";
     if (const char* v = std::getenv("LOAD_WEATHER_CSV")){ CFG.load.enable_weather=true; CFG.load.weather_csv=v; }
     if (const char* v = std::getenv("LOAD_COLUMN"))     { CFG.load.column_name=v; }
     if (const char* v = std::getenv("LOAD_UA_KW_PER_K"))try { CFG.load.UA_kW_per_K=std::stod(v);} catch(...) {}
@@ -142,8 +149,6 @@ int main() {
     if (const char* v = std::getenv("HEAT_START_DD"))    try { CFG.season.start_day   = std::stoi(v);} catch(...) {}
     if (const char* v = std::getenv("HEAT_END_MM"))      try { CFG.season.end_month   = std::stoi(v);} catch(...) {}
     if (const char* v = std::getenv("HEAT_END_DD"))      try { CFG.season.end_day     = std::stoi(v);} catch(...) {}
-    if (const char* v = std::getenv("ECON_CASING_COST_PER_M"))try { CFG.econ.casing_cost_per_m= std::stod(v);} catch(...) {}
-    if (const char* v = std::getenv("ECON_EHEP_COST_PER_M"))  try { CFG.econ.ehep_cost_per_m  = std::stod(v);} catch(...) {}
     if (const char* v = std::getenv("ECON_HP_COST"))         try { CFG.econ.hp_cost_fixed     = std::stod(v);} catch(...) {}
     if (const char* v = std::getenv("ECON_TANK_COST"))       try { CFG.econ.tank_cost_fixed   = std::stod(v);} catch(...) {}
     if (const char* v = std::getenv("ECON_PUMP_COST"))       try { CFG.econ.pump_cost_fixed   = std::stod(v);} catch(...) {}
@@ -170,31 +175,6 @@ int main() {
         }
     }
 
-    // Multi-segment enhancement: optional CSV, else fallback to single segment
-        if (const char* path = std::getenv("EHEP_SEGMENTS_CSV")){
-            FILE* f = fopen(path, "r");
-            if (f){ char buf[512]; bool first=true; while(fgets(buf,sizeof(buf),f)){
-                std::string line(buf); if(first){ first=false; if(line.find("z_start")!=std::string::npos) continue; }
-                std::stringstream ss(line); std::string c; std::vector<double> v; while(std::getline(ss,c,',')){ try{ v.push_back(std::stod(c)); } catch(...){} }
-                if (v.size()>=4){ EHEPSegment s; s.z_start_m=v[0]; s.z_end_m=v[1]; s.nu_mult=v[2]; s.f_mult=v[3]; CFG.enh_segments.push_back(s);} }
-                fclose(f);
-            }
-        }
-    {
-        auto baseNu = CFG.NuFunc;
-        CFG.NuFunc = [baseNu](double Re, double Pr, double z)->double{
-            double nu = 50.0; try { if (baseNu) nu = baseNu(Re, Pr, z); } catch(...) {}
-            double mult = 1.0;
-            if (!CFG.enh_segments.empty()){
-                for (auto& s: CFG.enh_segments){ if (z>=s.z_start_m && z<=s.z_end_m) mult *= std::max(1.0, s.nu_mult); }
-            } else if (CFG.enh.enable){
-                bool enhAll = (CFG.enh.z_end_m <= CFG.enh.z_start_m) || (CFG.enh.z_end_m <= 0.0);
-                if (enhAll || (z >= CFG.enh.z_start_m && z <= CFG.enh.z_end_m)) mult *= std::max(1.0, CFG.enh.nu_mult);
-            }
-            return nu * mult;
-        };
-    }
-
     // Integrated optimizer switch
     const char* runopt = std::getenv("RUN_OPTIMIZE");
     if (runopt && (*runopt!='0' && *runopt!='n' && *runopt!='N')){
@@ -210,5 +190,6 @@ int main() {
     }
     return 0;
 }
+
 
 

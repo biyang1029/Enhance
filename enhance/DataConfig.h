@@ -12,14 +12,14 @@ struct FluidProperty {
     double cp  = 4186.0;  // J/kg-K
     double k   = 0.6;     // W/m-K
     double mu  = 0.001;   // Pa·s
-    double inlet_T_C      = 15.0; // C
-    double massFlow_kgps  = 10.0; // kg/s
+    double inlet_T_C      = 10.0; // C
+    double massFlow_kgps  = 10.08; // kg/s
 };
 
 struct MaterialProperty {
-    double k   = 2.0;     // W/m-K
-    double rho = 1800.0;  // kg/m3
-    double cp  = 900.0;   // J/kg-K
+    double k   = 2.5;     // W/m-K
+    double rho = 2600.0;  // kg/m3
+    double cp  = 2600.0;   // J/kg-K
 };
 
 struct WellGeometry {
@@ -41,19 +41,19 @@ struct TimeControl {
     double timeStep_s  = 600.0;      // s
     int    totalSteps  = 6 * 24 * 10;
     int    maxIter     = 500;
-    double residualTol = 1e-5;
+    double residualTol = 1e-4;
 };
 
 // Weather-driven load configuration
 struct LoadConfig {
     bool        enable_weather = false;
-    std::string weather_csv    = "weather.csv";
+    std::string weather_csv    = "Weather_gansu.csv";
     std::string column_name    = "T_out_C";
-    double      indoor_T_C     = 23.0;
-    double      UA_kW_per_K    = 4.0;
+    double      indoor_T_C     = 20.0;
+    double      UA_kW_per_K    = 10.4;
     double      base_kW        = 5.0;
     bool        enable_cutoff  = false;  // if true, apply heat_cutoff_C rule
-    double      heat_cutoff_C  = 26.0;   // no space-heating load above this Tout
+    double      heat_cutoff_C  = 19.0;   // no space-heating load above this Tout
 };
 
 // Domestic Hot Water (DHW) load configuration (simple schedule-based)
@@ -70,17 +70,17 @@ struct DHWConfig {
 
 // Simple single-node buffer tank
 struct TankConfig {
-    double volume_m3   = 1.0;
+    double volume_m3   = 4.0;
     double setpoint_C  = 45.0;
     double deadband_K  = 2.0;
-    double min_T_C     = 30.0;
+    double min_T_C     = 5.0;
     double ambient_T_C = 20.0;
-    double UA_kW_per_K = 0.02;
+    double UA_kW_per_K = 0.0002;
 };
 
 // Pump hydraulics configuration
 struct PumpConfig {
-    double eff            = 0.70;   // pump-wire efficiency
+    double eff            = 0.75;   // pump-wire efficiency
     double rel_roughness  = 1e-5;   // epsilon/D
     double K_minor_annulus = 5.0;   // sum of minor-loss K on annulus
     double K_minor_inner   = 5.0;   // sum of minor-loss K on inner pipe
@@ -105,18 +105,22 @@ struct EHEPSegment {
 
 struct HeatPumpConfig {
     double defaultCOP = 3.0;
-    double Q_demand_kW = 350.0;
+    double Q_demand_kW = 250.0;
     double target_T_load_out_C = 45.0;
-    double freeze_guard_C = 1.0;
+    double freeze_guard_C = 0.0;   // soft guard off by default; can be raised via env
+    // cycle bounds
+    double evap_T_min_C   = -5.0;  // minimum evaporating temperature allowed
+    double cond_T_max_C   = 80.0;  // maximum condensing temperature allowed
+    double min_temp_lift_K = 10.0;  // minimal temperature lift between cond/evap
     // cycle temperature approaches and efficiency factors
-    double evap_approach_K = 3.0;   // source fluid above evap. saturation
-    double cond_approach_K = 3.0;   // cond. saturation above load outlet
-    double eff_carnot      = 0.5;   // fraction of Carnot COP (0..1)
+    double evap_approach_K = 5.0;   // source fluid above evap. saturation
+    double cond_approach_K = 7.0;   // cond. saturation above load outlet
+    double eff_carnot      = 0.40;  // fraction of Carnot COP (0..1)
     double mod_range_C     = 1.0;   // modulation span for freeze guard (K)
     bool   use_coolprop = true;     // allow disabling CoolProp runtime model
-    double max_Q_out_kW = 150.0;    // nameplate max heating output (kW)
-    double min_source_return_C = 1.0; // minimum allowed source return temp (C)
-    std::string fluid = "Water";
+    double max_Q_out_kW = 285.0;    // nameplate max heating output (kW)
+    double min_source_return_C = -5.0; // minimum allowed source return temp (C) assuming防冻液
+    std::string fluid = "R134a";
     double eta_isentropic = 0.7;
     double superheat_K = 5.0;
     double subcool_K   = 3.0;
@@ -132,7 +136,7 @@ struct DataConfig {
 
     // ground initial condition
     double T_surface_C      = 6.0;     // C at z=0
-    double geograd_C_per_m  = 0.035;   // C per meter
+    double geograd_C_per_m  = 0.04;   // C per meter
 
     // radial mesh coarse controls (duplicated for historical reasons)
     double rMax_m    = 200.0;
@@ -145,8 +149,8 @@ struct DataConfig {
     MaterialProperty grout;
     MaterialProperty pipe;
     // Optional explicit inner/outer wall conductivities; if >0, override pipe.k
-    double pipe_k_inner = 0.0; // W/m-K (for inner wall resistance R_w)
-    double pipe_k_outer = 0.0; // W/m-K (for outer wall resistance R_p)
+    double pipe_k_inner = 0.001; // W/m-K (for inner wall resistance R_w)
+    double pipe_k_outer = 4.0; // W/m-K (for outer wall resistance R_p)
 
     // plant side
     HeatPumpConfig   hp;
@@ -156,10 +160,10 @@ struct DataConfig {
     EnhanceConfig    enh;
     std::vector<EHEPSegment> enh_segments; // if empty, fall back to `enh`
     // Inner-pipe top insulation zone: apply lower equivalent conductivity within 0..top_len_m
-    struct InnerInsulConfig { bool enable=false; double top_len_m=0.0; double k_inner=0.1; } insul;
+    struct InnerInsulConfig { bool enable=false; double top_len_m=0.0; double k_inner=0.01; } insul;
 
     // Legacy simplified coupling coefficient (kept for compatibility; not used in new model)
-    double h_io_Wm2K = 10.0;
+    double h_io_Wm2K = 20.0;
 
     // Simulation calendar and heating season
     int sim_start_year  = 2025;

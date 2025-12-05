@@ -18,6 +18,10 @@ public:
         double Q_out_kW,
         double P_el_kW,
         double Q_geo_kW,
+        double T_outdoor_C,
+        double T_load_supply_C,
+        double T_load_return_C,
+        double T_hp_load_out_C,
         const std::string& model,
         const std::string& date_ymd,
         const std::string& time_hm,
@@ -42,7 +46,13 @@ public:
         double h1,
         double h2s,
         double h2,
-        double h3);
+        double h3,
+        double T_source_in_C,
+        double T_geo_in_C,
+        double Q_geo_kW,
+        double flow_src_kgps,
+        double flow_load_kgps,
+        double T_outdoor_C);
     void close();
 
 

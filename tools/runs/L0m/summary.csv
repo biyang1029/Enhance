@@ -1,0 +1,2 @@
+elec_kWh,comp_kWh,pump_kWh,heat_kWh,space_kWh,dhw_kWh,cost_elec,capex,lifetime_y,discount,CRF,LCOH_annual
+72713.2,5641.37,67071.8,44928,44587.5,340.5,40719.4,0,20,0.01,0.0554153,0.906326

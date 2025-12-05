@@ -1,33 +1,20 @@
-// DataConfig.cpp
+ï»¿// DataConfig.cpp
 #include "DataConfig.h"
 #include <algorithm>
 #include <cmath>
 
-DataConfig CFG;  // È«¾ÖÊµÀı
+DataConfig CFG;
 
-// ¿ÉÔÚ´Ë´¦×Ô¶¨Òå/¸²¸ÇÄ¬ÈÏ²ÎÊıÓë Nu ²ßÂÔ
-// ÄãÒ²¿ÉÒÔÔÚ main »ò SimulationController ³õÊ¼»¯Ê±ÊÖ¶¯ÉèÖÃ¡£
+// Boot-time init for defaults and Nu correlation
 static struct _BootInit {
     _BootInit() {
-        // Ê¾Àı²ÄÁÏ£¨¿É°´Ğèµ÷Õû£©
-        CFG.soil = { 2.0, 1800.0, 900.0 };   // k, rho, cp
-        CFG.grout = { 1.5, 2000.0, 1000.0 };
-        CFG.pipe = { 15.0, 7800.0, 500.0 };
-
-        // Ä¬ÈÏ Nu ²ßÂÔ£ºz >= 1500m ²ÉÓÃ¡°ÔöÇ¿¶Î¡±¾­ÑéÊ½£¬·ñÔò Dittus-Boelter
+        // Default Nu model: enhanced when z>=1500m; else Dittus-Boelter
         CFG.NuFunc = [](double Re, double Pr, double z_m) -> double {
             if (z_m >= 1500.0) {
-                // ÔöÇ¿¶Î£¨Ê¾ÀıÏµÊı£¬¿ÉºóĞøÌæ»»/²é±í£©
                 return 0.035 * std::pow(Re, 0.85) * std::pow(Pr, 0.40);
-            }
-            else {
-                // Dittus-Boelter£¨¼ÓÈÈ£ºn=0.4£»ÀäÈ´£ºn=0.3£¬°´ĞèÌæ»»£©
+            } else {
                 return 0.023 * std::pow(Re, 0.80) * std::pow(Pr, 0.40);
             }
-            };
-
-        // ÄãÒ²¿ÉÒÔÔÚÕâÀïµ÷ÕûÊ±¼ä¡¢¸ººÉµÈÄ¬ÈÏÖµ£º
-        // CFG.time.totalSteps = 8760; // ÅÜÒ»Äê
-        // CFG.hp.Q_demand_kW  = 80.0;
+        };
     }
-} _bootInitOnce;  // ³ÌĞò¼ÓÔØÊ±Ö´ĞĞÒ»´Î
+} _bootInitOnce;
